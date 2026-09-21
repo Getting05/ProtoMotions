@@ -54,6 +54,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from protomotions.utils.wandb_video import add_video_arguments, video_cli_options
+
 
 # =============================================================================
 # CLUSTER CONFIGURATION - EDIT THIS SECTION FOR YOUR CLUSTER
@@ -154,6 +156,8 @@ def create_parser():
     parser.add_argument("--experiment-name", type=str, required=True, help="Experiment name for logging")
     parser.add_argument("--user", type=str, required=True, help="Cluster username")
 
+    add_video_arguments(parser)
+
     # Optional arguments
     parser.add_argument("--scenes-file", type=str, default=None, help="Path to scenes file (optional)")
     parser.add_argument("--headless", default=True, help="Run headless (no GUI)")
@@ -250,6 +254,7 @@ def build_job_command(args, exp_folder, python_path):
         job_cmd += f"--use-wandb --wandb-project={args.wandb_project} "
     if args.checkpoint:
         job_cmd += f"--checkpoint={args.checkpoint} "
+    job_cmd += " ".join(video_cli_options(args)) + " "
     if args.overrides:
         job_cmd += f"--overrides {' '.join(args.overrides)} "
 

@@ -78,6 +78,13 @@ Example
 import os
 import sys
 import json
+from protomotions.utils.wandb_video import (
+    DEFAULTS as VIDEO_DEFAULTS,
+    BestPolicyVideoRecorder,
+    add_video_arguments,
+    explicit_video_options,
+    resolve_video_options,
+)
 
 os.environ["WANDB_DISABLE_SENTRY"] = "true"  # Must be first environment variable
 os.environ["WANDB_SILENT"] = "true"
@@ -202,6 +209,8 @@ def create_parser():
         required=True,
         help="Name of the experiment for logging and checkpointing",
     )
+
+    add_video_arguments(parser)
 
     # Optional arguments
     parser.add_argument(
@@ -622,6 +631,8 @@ def main():
     resolved_configs_path = save_dir / "resolved_configs.pt"
     original_experiment_path = Path(args.experiment_path)
 
+    video_overrides = explicit_video_options(args)
+
     # --create-config-only: Force fresh mode to just generate configs
     if args.create_config_only:
         log.info("CREATE CONFIG ONLY: Generating configs without training")
@@ -632,6 +643,8 @@ def main():
     # ===================================================================
     # 2. Load Configs Based on Mode
     # ===================================================================
+
+    resolve_video_options(args, video_overrides)
 
     if mode == "resume":
         # ===============================================================
@@ -1030,7 +1043,23 @@ def main():
     # ===================================================================
     # 7. Train
     # ===================================================================
-    agent.fit()
+    recorder = None
+    if getattr(args, "wandb_video", False) and fabric.global_rank == 0:
+        recorder = BestPolicyVideoRecorder(args, agent)
+        agent.video_recorder = recorder
+    if mode == "resume" and video_overrides and fabric.global_rank == 0:
+        # Persist only video options; preserve all original training arguments.
+        config_path = save_dir / "config.yaml"
+        saved_args = json.loads(config_path.read_text())
+        saved_args.update({key: getattr(args, key) for key in VIDEO_DEFAULTS})
+        temporary = config_path.with_suffix(".video.tmp")
+        temporary.write_text(json.dumps(saved_args, indent=2))
+        temporary.replace(config_path)
+    try:
+        agent.fit()
+    finally:
+        if recorder is not None:
+            recorder.close()
 
 
 def _handle_create_config_only(

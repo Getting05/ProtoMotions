@@ -54,6 +54,10 @@ def get_keypoint_indices(
     """
     mapping_lookup = {
         "smpl": KEYPOINT_MAPPING_SMPL,
+        # The 15 body landmarks used by the retargeter have the same names in
+        # ProtoMotions' SMPL and SMPL-X MJCFs. Finger bodies are intentionally
+        # ignored because P2 has no finger DOFs.
+        "smplx": KEYPOINT_MAPPING_SMPL,
         "soma": KEYPOINT_MAPPING_SOMA,
     }
     if skeleton_format not in mapping_lookup:
@@ -764,6 +768,7 @@ def extract_keypoints_from_motion(
     """
     dispatch = {
         "smpl": extract_keypoints_from_motion_smpl_skel,
+        "smplx": extract_keypoints_from_motion_smpl_skel,
         "soma": extract_keypoints_from_motion_soma_skel,
     }
     if skeleton_format not in dispatch:
@@ -795,6 +800,7 @@ def get_mjcf_path(skeleton_format: str) -> str:
     """
     paths = {
         "smpl": "protomotions/data/assets/mjcf/smpl_humanoid.xml",
+        "smplx": "protomotions/data/assets/mjcf/smplx_humanoid.xml",
         "soma": "protomotions/data/assets/mjcf/soma23_humanoid.xml",
     }
     if skeleton_format not in paths:

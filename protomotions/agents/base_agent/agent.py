@@ -833,6 +833,8 @@ class BaseAgent:
                 self._skip_next_policy_update = True
 
             self.post_epoch_logging(training_log_dict)
+            if getattr(self, "video_recorder", None) is not None:
+                self.video_recorder.tick(self)
             if self.config.max_episode_length_manager is not None:
                 max_episode_length = (
                     self.config.max_episode_length_manager.current_max_episode_length(

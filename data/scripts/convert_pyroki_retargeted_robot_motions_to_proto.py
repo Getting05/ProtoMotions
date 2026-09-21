@@ -91,7 +91,9 @@ def process_csv_file(csv_path, input_fps, output_fps, device, dtype):
     return root_pos, root_rot_wxyz, joint_angles, actual_output_fps
 
 
-def process_npz_file(npz_path, input_fps, output_fps, device, dtype):
+def process_npz_file(
+    npz_path, input_fps, output_fps, device, dtype, expected_joint_names=None
+):
     """
     Process an NPZ file and extract motion data.
 
@@ -112,6 +114,22 @@ def process_npz_file(npz_path, input_fps, output_fps, device, dtype):
     base_frame_pos = data["base_frame_pos"][::factor]
     base_frame_wxyz = data["base_frame_wxyz"][::factor]
     joint_angles = data["joint_angles"][::factor]
+
+    # New retargeters persist their joint order. Reorder by name when needed so
+    # an apparently valid (N, num_dofs) array cannot be attached to the wrong
+    # robot joints silently. Legacy files without metadata retain old behavior.
+    if "joint_names" in data and expected_joint_names is not None:
+        source_joint_names = [str(name) for name in data["joint_names"].tolist()]
+        missing = sorted(set(expected_joint_names) - set(source_joint_names))
+        extra = sorted(set(source_joint_names) - set(expected_joint_names))
+        if missing or extra:
+            raise ValueError(
+                f"Joint-name mismatch in {npz_path}: missing={missing}, extra={extra}"
+            )
+        source_indices = {name: idx for idx, name in enumerate(source_joint_names)}
+        joint_angles = joint_angles[
+            :, [source_indices[name] for name in expected_joint_names]
+        ]
 
     root_pos = torch.from_numpy(base_frame_pos).to(device, dtype)
     root_rot_wxyz = torch.from_numpy(base_frame_wxyz).to(device, dtype)
@@ -236,6 +254,8 @@ def main(
     robot_mjcf_mapping = {
         "g1": "g1_bm_box_feet.xml",
         "h1_2": "h1_2.xml",
+        "astro_p2": "../astro_p2/mjcf/astro_p2_protomotions.xml",
+        "p2": "../astro_p2/mjcf/astro_p2_protomotions.xml",
     }
 
     # Get kinematic info for the specified robot
@@ -290,7 +310,12 @@ def main(
                 )
             elif motion_file.suffix.lower() == ".npz":
                 root_pos, root_rot_wxyz, joint_angles, motion_fps = process_npz_file(
-                    motion_file_path, input_fps, output_fps, device, dtype
+                    motion_file_path,
+                    input_fps,
+                    output_fps,
+                    device,
+                    dtype,
+                    expected_joint_names=kinematic_info.dof_names,
                 )
             else:
                 print(f"Unsupported file format: {motion_file.suffix}")

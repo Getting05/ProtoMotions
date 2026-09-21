@@ -30,3 +30,5 @@ CLAUDE.local.md
 
 # Newton/IsaacLab viewer window state; churns on every run
 imgui.ini
+NvStreamer*
+data/*

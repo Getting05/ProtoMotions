@@ -2,12 +2,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Convenience script to retarget AMASS SMPL motions to a robot (G1 or H1_2)
+# Convenience script to retarget AMASS SMPL motions to a robot (G1, H1_2, or Astro P2)
 #
 # IMPORTANT: ProtoMotions and PyRoki require separate Python environments.
 # You must provide paths to both Python interpreters.
 #
-# Usage: ./scripts/retarget_amass_to_robot.sh <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--clean]
+# Usage: ./scripts/retarget_amass_to_robot.sh <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--clean]
 #
 # Example:
 #   ./scripts/retarget_amass_to_robot.sh \
@@ -19,22 +19,24 @@
 #   proto_python:  Path to Python interpreter with ProtoMotions installed
 #   pyroki_python: Path to Python interpreter with PyRoki installed
 #   amass_pt_file: Path to packaged AMASS MotionLib .pt file (outputs saved in same directory)
-#   robot_type:    Target robot: 'g1' or 'h1_2'
+#   robot_type:    Target robot: 'g1', 'h1_2', or 'astro_p2'
 #   skip_freq:     (Optional) Skip every N motions for subset processing (default: 1 = all motions)
+#   --source-skeleton: Packaged source skeleton (default: smpl)
 #   --clean:       (Optional) Remove all intermediate outputs before running, ensuring a fresh pipeline
 
 set -e  # Exit on error
 
 # Parse arguments
 if [ $# -lt 4 ]; then
-    echo "Usage: $0 <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--clean]"
+    echo "Usage: $0 <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--clean]"
     echo ""
     echo "Arguments:"
     echo "  proto_python   Path to Python interpreter with ProtoMotions installed"
     echo "  pyroki_python  Path to Python interpreter with PyRoki installed"
     echo "  amass_pt_file  Path to packaged AMASS MotionLib .pt file (outputs saved in same dir)"
-    echo "  robot_type     Target robot: 'g1' or 'h1_2'"
+    echo "  robot_type     Target robot: 'g1', 'h1_2', 'astro_p2', or 'p2'"
     echo "  skip_freq      (Optional) Skip every N motions (default: 1 = all motions)"
+    echo "  --source-skeleton  Packaged source skeleton: smpl or smplx (default: smpl)"
     echo "  --clean        (Optional) Remove all intermediate outputs before running"
     echo ""
     echo "Example:"
@@ -46,12 +48,46 @@ PROTO_PYTHON="$1"
 PYROKI_PYTHON="$2"
 AMASS_PT_FILE="$3"
 ROBOT_TYPE="$4"
-SKIP_FREQ="${5:-1}"
-CLEAN="${6:-}"
+shift 4
+SKIP_FREQ="1"
+CLEAN=""
+SOURCE_SKELETON="smpl"
+SKIP_SET="false"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --clean)
+            CLEAN="--clean"
+            shift
+            ;;
+        --source-skeleton)
+            if [ $# -lt 2 ]; then
+                echo "Error: --source-skeleton requires smpl or smplx"
+                exit 1
+            fi
+            SOURCE_SKELETON="$2"
+            shift 2
+            ;;
+        *)
+            if [ "$SKIP_SET" == "false" ] && [[ "$1" =~ ^[1-9][0-9]*$ ]]; then
+                SKIP_FREQ="$1"
+                SKIP_SET="true"
+                shift
+            else
+                echo "Error: unknown argument '$1'"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+if [ "$SOURCE_SKELETON" != "smpl" ] && [ "$SOURCE_SKELETON" != "smplx" ]; then
+    echo "Error: --source-skeleton must be 'smpl' or 'smplx'"
+    exit 1
+fi
 
 # Validate robot type
-if [ "$ROBOT_TYPE" != "g1" ] && [ "$ROBOT_TYPE" != "h1_2" ]; then
-    echo "Error: robot_type must be 'g1' or 'h1_2'"
+if [ "$ROBOT_TYPE" != "g1" ] && [ "$ROBOT_TYPE" != "h1_2" ] && [ "$ROBOT_TYPE" != "astro_p2" ] && [ "$ROBOT_TYPE" != "p2" ]; then
+    echo "Error: robot_type must be 'g1', 'h1_2', 'astro_p2', or 'p2'"
     exit 1
 fi
 
@@ -65,6 +101,23 @@ if [ ! -f "$PYROKI_PYTHON" ]; then
     echo "Error: PyRoki Python not found: $PYROKI_PYTHON"
     exit 1
 fi
+
+# Prefer CUDA libraries installed inside the dedicated PyRoki environment.
+# This server's system cuDNN may be older than the version required by JAX.
+PYROKI_SITE_PACKAGES="$($PYROKI_PYTHON -c 'import site; print(site.getsitepackages()[0])')"
+PYROKI_CUDA_LIBS=""
+for CUDA_LIB_DIR in \
+    "$PYROKI_SITE_PACKAGES/nvidia/cudnn/lib" \
+    "$PYROKI_SITE_PACKAGES/nvidia/cublas/lib" \
+    "$PYROKI_SITE_PACKAGES/nvidia/cuda_nvrtc/lib"; do
+    if [ -d "$CUDA_LIB_DIR" ]; then
+        PYROKI_CUDA_LIBS="${PYROKI_CUDA_LIBS:+$PYROKI_CUDA_LIBS:}$CUDA_LIB_DIR"
+    fi
+done
+if [ -n "$PYROKI_CUDA_LIBS" ]; then
+    export LD_LIBRARY_PATH="${PYROKI_CUDA_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
 # Validate input file exists
 if [ ! -f "$AMASS_PT_FILE" ]; then
@@ -105,15 +158,16 @@ echo "PyRoki Python:       $PYROKI_PYTHON"
 echo "Input:               $AMASS_PT_FILE"
 echo "Output dir:          $OUTPUT_DIR"
 echo "Skip freq:           $SKIP_FREQ (1 = all motions)"
+echo "Source skeleton:     $SOURCE_SKELETON"
 echo "=============================================="
 
 # Step 1: Extract keypoints from packaged MotionLib (uses ProtoMotions)
 echo ""
-echo "[Step 1/5] Extracting keypoints from SMPL motions..."
+echo "[Step 1/5] Extracting keypoints from ${SOURCE_SKELETON^^} motions..."
 $PROTO_PYTHON data/scripts/extract_retargeting_input_keypoints_from_packaged_motionlib.py \
     "$AMASS_PT_FILE" \
     --output-path "$KEYPOINTS_DIR" \
-    --skeleton-format smpl \
+    --skeleton-format "$SOURCE_SKELETON" \
     --start-idx 0 \
     --skip-freq "$SKIP_FREQ"
 
@@ -128,8 +182,16 @@ if [ "$ROBOT_TYPE" == "g1" ]; then
         --output-dir "$RETARGETED_DIR" \
         --no-visualize \
         --skip-existing
-else
+elif [ "$ROBOT_TYPE" == "h1_2" ]; then
     $PYROKI_PYTHON pyroki/batch_retarget_to_h1_2_from_keypoints.py \
+        --subsample-factor 1 \
+        --keypoints-folder-path "$KEYPOINTS_DIR" \
+        --source-type smpl \
+        --output-dir "$RETARGETED_DIR" \
+        --no-visualize \
+        --skip-existing
+else
+    $PYROKI_PYTHON pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \
@@ -149,8 +211,16 @@ if [ "$ROBOT_TYPE" == "g1" ]; then
         --save-contacts-only \
         --contacts-dir "$CONTACTS_DIR" \
         --skip-existing
-else
+elif [ "$ROBOT_TYPE" == "h1_2" ]; then
     $PYROKI_PYTHON pyroki/batch_retarget_to_h1_2_from_keypoints.py \
+        --subsample-factor 1 \
+        --keypoints-folder-path "$KEYPOINTS_DIR" \
+        --source-type smpl \
+        --save-contacts-only \
+        --contacts-dir "$CONTACTS_DIR" \
+        --skip-existing
+else
+    $PYROKI_PYTHON pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \

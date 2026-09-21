@@ -66,6 +66,11 @@ def create_parser():
     parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to checkpoint file to test"
     )
+    parser.add_argument(
+        "--video-request", type=str, default=None,
+        help="Internal bounded-video request JSON",
+    )
+
     # Optional arguments
     parser.add_argument(
         "--full-eval",
@@ -341,6 +346,23 @@ def main():
         log.info(f"CLI override: command_source = {args.command_source}")
         apply_command_source_overrides(env_config, args.command_source)
 
+    video_request = None
+    if args.video_request:
+        import json
+
+        from protomotions.utils.policy_video import (
+            configure_video_inference, prepare_video_motion,
+        )
+
+        video_request = json.loads(Path(args.video_request).read_text())
+        if args.simulator != "isaaclab":
+            raise ValueError("Bounded video recording currently requires IsaacLab")
+        args.headless = True
+        prepare_video_motion(video_request, Path(args.video_request).parent)
+        configure_video_inference(
+            video_request, simulator_config, motion_lib_config, scene_lib_config, env_config
+        )
+
     motion_lib_config.validate()
 
     # Create fabric config for inference (simplified)
@@ -355,6 +377,8 @@ def main():
     )
     fabric: Fabric = Fabric(**fabric_config.as_kwargs())
     fabric.launch()
+    if video_request is not None:
+        fabric.seed_everything(0)
 
     # Setup IsaacLab simulation_app if using IsaacLab simulator
     simulator_extra_params = {}
@@ -366,6 +390,8 @@ def main():
             )
             simulator_config.w_last = True
         app_launcher_flags = {"headless": args.headless, "device": str(fabric.device)}
+        if video_request is not None:
+            app_launcher_flags["enable_cameras"] = True
         if not args.headless:
             app_launcher_flags["visualizer"] = ["kit"]
         app_launcher = AppLauncher(app_launcher_flags)
@@ -450,7 +476,11 @@ def main():
             log.info("Viewer keybinds:\n%s", help_text)
 
     try:
-        if args.full_eval:
+        if video_request is not None:
+            from protomotions.utils.policy_video import record_policy_video
+
+            record_policy_video(agent, video_request, args.checkpoint)
+        elif args.full_eval:
             agent.evaluator.eval_count = 0
             evaluation_log, evaluated_score, num_eval_items = (
                 agent.evaluator.evaluate()
