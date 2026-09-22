@@ -1,0 +1,31 @@
+format_version: 1
+human:
+  format: smpl_pkl
+  axes: [z, x, y]
+robot:
+  format: urdf
+  model: unitree_g1_29dof
+  base_link: pelvis
+  # Resolved relative to the URDF directory. This matches ProtoMotions' layout.
+  mesh_dir: ../../mesh/G1
+  keypoint_links:
+    pelvis: pelvis_contour_link
+    left_hip: left_hip_pitch_link
+    right_hip: right_hip_pitch_link
+    left_knee: left_knee_link
+    right_knee: right_knee_link
+    left_ankle: left_ankle_roll_link
+    right_ankle: right_ankle_roll_link
+    left_foot: left_foot_link
+    right_foot: right_foot_link
+    left_shoulder: left_shoulder_pitch_link
+    right_shoulder: right_shoulder_pitch_link
+    left_elbow: left_elbow_link
+    right_elbow: right_elbow_link
+    left_wrist: left_wrist_yaw_link
+    right_wrist: right_wrist_yaw_link
+  t_pose_joint_positions:
+    left_shoulder_roll_joint: 1.5708
+    right_shoulder_roll_joint: -1.5708
+    left_elbow_joint: 1.5708
+    right_elbow_joint: 1.5708

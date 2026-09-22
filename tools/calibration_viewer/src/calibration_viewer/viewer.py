@@ -279,14 +279,20 @@ class CalibrationViewer:
         self.metrics_gui.content = _metrics_markdown(human, robot, rmse)
 
     def _export(self) -> None:
+        robot_config = dict(self.config.get("robot", {}))
+        robot_config.update(
+            {
+                "base_link": self.robot.base_link,
+                "keypoint_links": self.robot.keypoint_links,
+                "t_pose_joint_positions": {
+                    k: float(v) for k, v in self.joints.items()
+                },
+            }
+        )
         data = {
             "format_version": 1,
             "human": self.config.get("human", {}),
-            "robot": {
-                "base_link": self.robot.base_link,
-                "keypoint_links": self.robot.keypoint_links,
-                "t_pose_joint_positions": {k: float(v) for k, v in self.joints.items()},
-            },
+            "robot": robot_config,
             "calibration": self.params.serializable(),
         }
         save_config(self.output, data)

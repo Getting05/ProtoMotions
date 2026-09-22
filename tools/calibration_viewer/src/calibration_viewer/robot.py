@@ -9,6 +9,18 @@ import numpy as np
 import yourdfpy
 
 
+def _mesh_filename_handler(
+    fname: str, *, urdf_dir: Path, mesh_dir: Path | None
+) -> str:
+    """Resolve normal URDF paths plus ProtoMotions' external mesh directories."""
+    if mesh_dir is not None:
+        clean = Path(yourdfpy.filename_handler_ignore_directive(fname))
+        for candidate in (mesh_dir / clean.name, mesh_dir / clean):
+            if candidate.is_file():
+                return str(candidate)
+    return yourdfpy.filename_handler_magic(fname, dir=urdf_dir)
+
+
 @dataclass
 class RobotModel:
     path: Path
@@ -21,9 +33,20 @@ class RobotModel:
 
     @classmethod
     def load(
-        cls, path: str | Path, *, base_link: str, keypoint_links: Mapping[str, str]
+        cls,
+        path: str | Path,
+        *,
+        base_link: str,
+        keypoint_links: Mapping[str, str],
+        mesh_dir: str | Path | None = None,
     ) -> "RobotModel":
         path = Path(path).resolve()
+        mesh_dir_path = None if mesh_dir is None else Path(mesh_dir).resolve()
+        filename_handler = partial(
+            _mesh_filename_handler,
+            urdf_dir=path.parent,
+            mesh_dir=mesh_dir_path,
+        )
         visual_error = None
         try:
             urdf = yourdfpy.URDF.load(
@@ -32,7 +55,7 @@ class RobotModel:
                 build_collision_scene_graph=True,
                 load_meshes=True,
                 load_collision_meshes=True,
-                filename_handler=partial(yourdfpy.filename_handler_magic, dir=path.parent),
+                filename_handler=filename_handler,
             )
         except Exception as mesh_error:
             visual_error = f"{type(mesh_error).__name__}: {mesh_error}"
@@ -43,7 +66,7 @@ class RobotModel:
                     build_collision_scene_graph=True,
                     load_meshes=False,
                     load_collision_meshes=True,
-                    filename_handler=partial(yourdfpy.filename_handler_magic, dir=path.parent),
+                    filename_handler=filename_handler,
                 )
             except Exception:
                 raise mesh_error

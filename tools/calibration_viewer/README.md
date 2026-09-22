@@ -47,6 +47,17 @@ pip install -e '.[smpl]'
 
 SMPL body-model files are licensed separately and are not included.
 
+## Included robot presets
+
+| Robot | ProtoMotions URDF | Viewer config |
+|---|---|---|
+| Astro P2 | `protomotions/data/assets/astro_p2/urdf/astro_p2_retarget.urdf` | `configs/astro_p2.yaml` |
+| Unitree G1 29-DOF | `protomotions/data/assets/urdf/for_retargeting/g1.urdf` | `configs/unitree_g1.yaml` |
+| Unitree H1-2 27-DOF | `protomotions/data/assets/urdf/for_retargeting/h1_2.urdf` | `configs/unitree_h1_2.yaml` |
+
+The H1 preset follows the `H1_2` model shipped by ProtoMotions. Original H1 and
+H1-2 have different kinematic structures and should not share the same preset.
+
 ## Run with Astro P2
 
 From a ProtoMotions checkout:
@@ -58,6 +69,30 @@ calibration-viewer \
   --config /path/to/calibration-viewer/configs/astro_p2.yaml \
   --output astro_p2_calibration.yaml
 ```
+
+For Unitree G1:
+
+```bash
+calibration-viewer \
+  --smpl /path/to/smpl.pkl \
+  --urdf protomotions/data/assets/urdf/for_retargeting/g1.urdf \
+  --config /path/to/calibration-viewer/configs/unitree_g1.yaml \
+  --output g1_calibration.yaml
+```
+
+For the Unitree H1-2 model included in ProtoMotions:
+
+```bash
+calibration-viewer \
+  --smpl /path/to/smpl.pkl \
+  --urdf protomotions/data/assets/urdf/for_retargeting/h1_2.urdf \
+  --config /path/to/calibration-viewer/configs/unitree_h1_2.yaml \
+  --output h1_2_calibration.yaml
+```
+
+The Unitree presets include `robot.mesh_dir` values matching the ProtoMotions
+asset layout. Relative mesh directories are resolved from the URDF directory;
+`--mesh-dir PATH` can override them for another checkout layout.
 
 Open the URL printed by Viser, normally `http://localhost:8080`. For a remote
 server, forward the port first:
@@ -102,6 +137,8 @@ Copy `configs/generic_smpl_to_urdf.yaml`, then set:
    symmetric canonical pose.
 4. `human.axes` to `[forward, left, up]` in the source SMPL coordinates. Signed
    axes such as `-z` are accepted.
+5. Optional `robot.mesh_dir` when mesh files live outside the URDF directory.
+   Relative values are interpreted from the URDF directory.
 
 The included SMPL default is `[z, x, y]`. Exporters differ, so verify the axis
 triad in the scene before interpreting fitted XYZ scales.

@@ -13,6 +13,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--smpl", required=True, type=Path, help="SMPL pkl: joints, model, or pose parameters")
     parser.add_argument("--urdf", required=True, type=Path, help="Robot URDF")
     parser.add_argument("--config", required=True, type=Path, help="Robot mapping YAML")
+    parser.add_argument(
+        "--mesh-dir",
+        type=Path,
+        help="Optional URDF mesh directory; overrides robot.mesh_dir in the config",
+    )
     parser.add_argument("--smpl-model", type=Path, help="SMPL model directory/file for pose-parameter pkl")
     parser.add_argument("--frame", type=int, default=0)
     parser.add_argument("--gender", choices=("neutral", "male", "female"), default="neutral")
@@ -32,7 +37,17 @@ def main() -> None:
     axes = human_cfg.get("axes", ["z", "x", "y"])
     human = load_smpl_pkl(args.smpl, frame=args.frame, model_path=args.smpl_model, gender=args.gender).transformed(axes)
     robot_cfg = cfg["robot"]
-    robot = RobotModel.load(args.urdf, base_link=robot_cfg["base_link"], keypoint_links=robot_cfg["keypoint_links"])
+    mesh_dir = args.mesh_dir or robot_cfg.get("mesh_dir")
+    if mesh_dir is not None:
+        mesh_dir = Path(mesh_dir)
+        if not mesh_dir.is_absolute():
+            mesh_dir = args.urdf.resolve().parent / mesh_dir
+    robot = RobotModel.load(
+        args.urdf,
+        base_link=robot_cfg["base_link"],
+        keypoint_links=robot_cfg["keypoint_links"],
+        mesh_dir=mesh_dir,
+    )
     robot.update(robot_cfg.get("t_pose_joint_positions", {}))
     if args.fit_only:
         from .calibration import fit_calibration
