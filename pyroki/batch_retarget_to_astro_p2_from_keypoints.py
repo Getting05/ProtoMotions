@@ -434,6 +434,18 @@ def main():
         default=30.0,
         help="FPS of the input keypoint data (before subsampling). Used for velocity limit cost.",
     )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=1,
+        help="Split the sorted input file list into this many interleaved shards.",
+    )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard handled by this process.",
+    )
 
     args = parser.parse_args()
 
@@ -443,6 +455,17 @@ def main():
     # Dynamically populate the list of motion data paths
     test_keypoints_paths = sorted(
         glob.glob(os.path.join(keypoints_folder_path, "*.npy"))
+    )
+
+    if args.num_shards < 1:
+        parser.error("--num-shards must be at least 1")
+    if not 0 <= args.shard_index < args.num_shards:
+        parser.error("--shard-index must satisfy 0 <= index < num-shards")
+    total_motion_count = len(test_keypoints_paths)
+    test_keypoints_paths = test_keypoints_paths[args.shard_index :: args.num_shards]
+    print(
+        f"Shard {args.shard_index + 1}/{args.num_shards}: "
+        f"selected {len(test_keypoints_paths)} of {total_motion_count} motions."
     )
 
     if not test_keypoints_paths:

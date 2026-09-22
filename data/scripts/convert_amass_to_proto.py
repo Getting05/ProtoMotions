@@ -10,8 +10,6 @@ import yaml
 import numpy as np
 import torch
 import typer
-from scipy.spatial.transform import Rotation as sRot
-
 from data.smpl.smpl_joint_names import (
     SMPL_BONE_ORDER_NAMES,
     SMPL_MUJOCO_NAMES,
@@ -22,8 +20,10 @@ from data.smpl.smpl_joint_names import (
 from tqdm import tqdm
 
 from protomotions.utils.rotations import (
+    axis_angle_to_quaternion,
     matrix_to_quaternion,
     quat_mul,
+    quat_from_euler_xyz,
     quaternion_to_matrix,
 )
 
@@ -38,7 +38,6 @@ from protomotions.components.pose_lib import (
     compute_forward_kinematics_from_transforms,
     compute_joint_rot_mats_from_global_mats,
 )
-
 from contact_detection import compute_contact_labels_from_pos_and_vel
 
 TMP_SMPL_DIR = "/tmp/smpl"
@@ -149,34 +148,24 @@ def convert_amass_to_motion(
     ]
     batch_size = pose_aa.shape[0]
 
+    # Move raw arrays to the target device before the tensor-heavy conversion.
+    amass_trans = torch.as_tensor(amass_trans, device=device, dtype=dtype)
+    pose_aa = torch.as_tensor(pose_aa, device=device, dtype=dtype)
+
     if humanoid_type == "smpl":
-        pose_aa = np.concatenate(
-            [pose_aa[:, :66], np.zeros((batch_size, 6))],
-            axis=1,
+        pose_aa = torch.cat(
+            [pose_aa[:, :66], torch.zeros((batch_size, 6), device=device, dtype=dtype)],
+            dim=1,
         )  # TODO: need to extract correct handle rotations instead of zero
         pose_aa_mj = pose_aa.reshape(batch_size, 24, 3)[:, smpl_2_mujoco]
-        pose_quat = (
-            sRot.from_rotvec(pose_aa_mj.reshape(-1, 3))
-            .as_quat()
-            .reshape(batch_size, 24, 4)
-        )
     else:
-        pose_aa = np.concatenate(
-            [
-                pose_aa[:, :66],
-                pose_aa[:, 75:],
-            ],
-            axis=-1,
+        pose_aa = torch.cat(
+            [pose_aa[:, :66], pose_aa[:, 75:]],
+            dim=-1,
         )
         pose_aa_mj = pose_aa.reshape(batch_size, 52, 3)[:, smpl_2_mujoco]
-        pose_quat = (
-            sRot.from_rotvec(pose_aa_mj.reshape(-1, 3))
-            .as_quat()
-            .reshape(batch_size, 52, 4)
-        )
 
-    amass_trans = torch.from_numpy(amass_trans).to(device, dtype)
-    pose_quat = torch.from_numpy(pose_quat).to(device, dtype)
+    pose_quat = axis_angle_to_quaternion(pose_aa_mj, w_last=True)
     local_rot_mats = quaternion_to_matrix(pose_quat, w_last=True)
 
     _, world_rot_mat = compute_forward_kinematics_from_transforms(
@@ -184,12 +173,12 @@ def convert_amass_to_motion(
     )
     global_quat = matrix_to_quaternion(world_rot_mat, w_last=True)
 
-    rot1 = sRot.from_euler("xyz", np.array([-np.pi / 2, -np.pi / 2, 0]), degrees=False)
-    rot1_quat = (
-        torch.from_numpy(rot1.as_quat())
-        .to(device, dtype)
-        .expand(amass_trans.shape[0], -1)
-    )
+    rot1_quat = quat_from_euler_xyz(
+        torch.tensor(-torch.pi / 2, device=device, dtype=dtype),
+        torch.tensor(-torch.pi / 2, device=device, dtype=dtype),
+        torch.tensor(0.0, device=device, dtype=dtype),
+        w_last=True,
+    ).expand(amass_trans.shape[0], -1)
 
     n_j = 23 if humanoid_type == "smpl" else 51  # smplx has 51 non-root joints
     for i in range(0, n_j + 1):
@@ -295,11 +284,14 @@ def main(
     humanoid_type: str = "smpl",
     force_remake: bool = False,
     output_fps: int = 30,
+    device: str = typer.Option("cpu", "--device", help="Device for tensor processing (cpu or cuda)"),
     motion_configs: List[str] = typer.Option(
         None, "--motion-config", help="YAML files containing motion configurations"
     ),
 ):
-    device = torch.device("cpu")  # cuda does not seem faster?
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested, but torch.cuda.is_available() is False")
+    device = torch.device(device)
     dtype = torch.float32
 
     # Load motion configurations if provided

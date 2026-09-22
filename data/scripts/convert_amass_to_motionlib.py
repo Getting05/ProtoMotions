@@ -137,6 +137,8 @@ Examples:
         args.humanoid_type,
         "--output-fps",
         str(args.output_fps),
+        "--device",
+        args.device,
     ]
 
     if args.force_remake:

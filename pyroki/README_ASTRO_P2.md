@@ -14,7 +14,7 @@ cd /data/chenguanting/ProtoMotions
   ~/.venvs/protomotions-mujoco/bin/python \
   ~/.venvs/astro-p2-retarget/bin/python \
   /path/to/amass_smplx_train.pt \
-  astro_p2 50 --source-skeleton smplx
+  astro_p2 50 --source-skeleton smplx --retarget-device cpu
 ```
 
 Use `50` for an initial sample and `1` for all motions. Add `--clean` only when
@@ -46,16 +46,49 @@ PYTHONPATH=. ~/.venvs/protomotions-mujoco/bin/python \
   --robot astro_p2 --simulator mujoco
 ```
 
-For direct keypoint input:
+For direct keypoint input (CPU is the default):
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 XLA_PYTHON_CLIENT_PREALLOCATE=false \
+scripts/run_astro_p2_retarget.sh \
   ~/.venvs/astro-p2-retarget/bin/python \
-  pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
   --keypoints-folder-path /path/to/keypoints-for-retarget \
   --output-dir /path/to/pyroki-retargeted-astro_p2 \
   --source-type smpl --no-visualize --skip-existing
 ```
+
+CPU mode is verified end to end on this server. For GPU mode, install the full
+JAX CUDA 12 dependency set in the dedicated environment, then opt in explicitly:
+
+```bash
+~/.local/bin/uv pip install \
+  --python ~/.venvs/astro-p2-retarget/bin/python \
+  "jax[cuda12]==0.6.2"
+
+ASTRO_P2_RETARGET_DEVICE=gpu CUDA_VISIBLE_DEVICES=0 \
+  scripts/run_astro_p2_retarget.sh \
+  ~/.venvs/astro-p2-retarget/bin/python \
+  --keypoints-folder-path /path/to/keypoints-for-retarget \
+  --output-dir /path/to/pyroki-retargeted-astro_p2 \
+  --source-type smpl --no-visualize --skip-existing
+```
+
+Use `--retarget-device gpu` instead when running the complete AMASS wrapper.
+
+For eight-GPU file-level parallelism, run one PyRoki process per GPU:
+
+```bash
+ASTRO_P2_GPUS=0,1,2,3,4,5,6,7 \
+  scripts/run_astro_p2_retarget_multi_gpu.sh \
+  ~/.venvs/astro-p2-retarget/bin/python \
+  /path/to/keypoints-for-retarget \
+  /path/to/pyroki-retargeted-astro_p2 \
+  --source-type smplx --subsample-factor 1
+```
+
+The complete AMASS pipeline can launch the same eight workers with
+`--retarget-gpus 0,1,2,3,4,5,6,7`. Each worker gets an interleaved shard of
+the sorted motion list, writes unique output files, and records its log under
+the output directory's `logs/` folder.
 
 The retargeted NPZ stores `joint_names`; the ProtoMotions converter validates
 and reorders by these names before forward kinematics. This protects P2's
