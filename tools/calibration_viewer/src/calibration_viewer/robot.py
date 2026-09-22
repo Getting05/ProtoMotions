@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Mapping
 
@@ -14,26 +15,59 @@ class RobotModel:
     urdf: yourdfpy.URDF
     base_link: str
     keypoint_links: dict[str, str]
+    visuals_loaded: bool
+    collisions_loaded: bool
+    visual_error: str | None = None
 
     @classmethod
     def load(
         cls, path: str | Path, *, base_link: str, keypoint_links: Mapping[str, str]
     ) -> "RobotModel":
         path = Path(path).resolve()
+        visual_error = None
         try:
-            urdf = yourdfpy.URDF.load(path, load_meshes=True)
+            urdf = yourdfpy.URDF.load(
+                path,
+                build_scene_graph=True,
+                build_collision_scene_graph=True,
+                load_meshes=True,
+                load_collision_meshes=True,
+                filename_handler=partial(yourdfpy.filename_handler_magic, dir=path.parent),
+            )
         except Exception as mesh_error:
+            visual_error = f"{type(mesh_error).__name__}: {mesh_error}"
             try:
-                urdf = yourdfpy.URDF.load(path, load_meshes=False)
+                urdf = yourdfpy.URDF.load(
+                    path,
+                    build_scene_graph=False,
+                    build_collision_scene_graph=True,
+                    load_meshes=False,
+                    load_collision_meshes=True,
+                    filename_handler=partial(yourdfpy.filename_handler_magic, dir=path.parent),
+                )
             except Exception:
                 raise mesh_error
+        visuals_loaded = urdf.scene is not None and bool(urdf.scene.geometry)
+        collisions_loaded = (
+            urdf.collision_scene is not None and bool(urdf.collision_scene.geometry)
+        )
+        if not visuals_loaded and visual_error is None:
+            visual_error = "URDF contains no loadable visual geometry"
         available = set(urdf.link_map)
         missing = {v for v in keypoint_links.values() if v not in available}
         if base_link not in available:
             missing.add(base_link)
         if missing:
             raise ValueError(f"URDF is missing configured links: {sorted(missing)}")
-        return cls(path, urdf, base_link, dict(keypoint_links))
+        return cls(
+            path,
+            urdf,
+            base_link,
+            dict(keypoint_links),
+            visuals_loaded=visuals_loaded,
+            collisions_loaded=collisions_loaded,
+            visual_error=visual_error,
+        )
 
     @property
     def actuated_joint_names(self) -> tuple[str, ...]:
@@ -61,4 +95,3 @@ class RobotModel:
             link_world = self.urdf.get_transform(link)
             result[name] = (world_base @ link_world)[:3, 3].copy()
         return result
-

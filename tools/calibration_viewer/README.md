@@ -15,7 +15,11 @@ viewer.
   - an SMPL model containing `v_template` and `J_regressor`;
   - pose parameters such as `poses`/`pose` when an SMPL model is supplied.
 - Loads arbitrary URDF robots and maps semantic human keypoints to link origins.
-- Shows the robot model, SMPL target skeleton, robot keypoints, and residuals.
+- Renders URDF visual geometry and the SMPL body mesh when the source data makes
+  them available. If referenced URDF mesh files are absent, collision geometry
+  is used as a diagnostic fallback.
+- Provides independent visibility switches for the URDF mesh, SMPL mesh, SMPL
+  skeleton, robot keypoints, and residual lines.
 - Provides sliders for upper/lower XYZ scale and shoulder/elbow lateral offsets.
 - Provides a joint slider for every actuated URDF joint to establish a robot
   canonical pose.
@@ -75,6 +79,19 @@ available for scripts and CI:
 calibration-viewer ... --fit-only
 ```
 
+Use `--hide-urdf-mesh` or `--hide-smpl-mesh` when you want either surface hidden
+at startup. The same visibility options are available interactively in the
+viewer. If a mesh cannot be loaded, the Diagnostics panel reports why; skeleton
+and keypoint calibration remains available.
+
+The SMPL surface is the pelvis-centered source mesh. Morphology sliders continue
+to operate on the calibration skeleton/keypoints; the surface is intentionally
+left unwarped so it can expose source-axis, pose, and model-loading problems.
+
+The bundled Astro P2 preset bends both elbow joints by +90 degrees because that
+URDF's elbow zero pose points each forearm forward. This makes the complete arm
+straight in the initial T-pose; it is not a wrist-joint correction.
+
 ## Configure another robot
 
 Copy `configs/generic_smpl_to_urdf.yaml`, then set:
@@ -122,4 +139,3 @@ robot canonical joint positions, making a calibration reproducible.
 pip install -e '.[test]'
 pytest
 ```
-

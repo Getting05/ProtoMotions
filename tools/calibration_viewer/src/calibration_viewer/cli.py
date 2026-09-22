@@ -19,6 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, default=Path("calibration.yaml"))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--hide-urdf-mesh", action="store_true", help="Start with the URDF mesh hidden")
+    parser.add_argument("--hide-smpl-mesh", action="store_true", help="Start with the SMPL mesh hidden")
     parser.add_argument("--fit-only", action="store_true", help="Fit once and write YAML without starting Viser")
     return parser
 
@@ -40,9 +42,17 @@ def main() -> None:
         print(f"Saved {args.output} (RMSE {info['rmse_m'] * 100:.2f} cm, rank {info['rank']}/8)")
         return
     from .viewer import CalibrationViewer
-    CalibrationViewer(human, robot, cfg, output=args.output, host=args.host, port=args.port).run()
+    CalibrationViewer(
+        human,
+        robot,
+        cfg,
+        output=args.output,
+        host=args.host,
+        port=args.port,
+        show_robot_mesh=not args.hide_urdf_mesh,
+        show_smpl_mesh=not args.hide_smpl_mesh,
+    ).run()
 
 
 if __name__ == "__main__":
     main()
-

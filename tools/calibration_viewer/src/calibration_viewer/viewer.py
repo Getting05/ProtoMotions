@@ -50,6 +50,8 @@ class CalibrationViewer:
         output: Path,
         host: str,
         port: int,
+        show_robot_mesh: bool = True,
+        show_smpl_mesh: bool = True,
     ) -> None:
         self.human = human
         self.robot = robot
@@ -66,10 +68,28 @@ class CalibrationViewer:
         self.joints = {name: 0.0 for name in robot.actuated_joint_names}
         self.joints.update({k: float(v) for k, v in config.get("robot", {}).get("t_pose_joint_positions", {}).items()})
         self.robot.update(self.joints)
-        self.robot_vis = ViserUrdf(self.server, robot.urdf, root_node_name="/robot")
-        self.robot_vis.update_cfg(np.array([self.joints[n] for n in robot.actuated_joint_names]))
+        self.robot_root = None
+        self.robot_vis = None
+        robot_renderable = robot.visuals_loaded or robot.collisions_loaded
+        if robot_renderable:
+            self.robot_root = self.server.scene.add_frame(
+                "/robot_mesh", show_axes=False, visible=show_robot_mesh
+            )
+            self.robot_vis = ViserUrdf(
+                self.server,
+                robot.urdf,
+                root_node_name="/robot_mesh",
+                load_meshes=robot.visuals_loaded,
+                load_collision_meshes=robot.collisions_loaded,
+                collision_mesh_color_override=(245, 80, 70, 0.42),
+            )
+            if robot.collisions_loaded:
+                self.robot_vis.show_collision = not robot.visuals_loaded
+            self.robot_vis.update_cfg(
+                np.array([self.joints[n] for n in robot.actuated_joint_names])
+            )
         self.server.scene.add_grid("/ground", width=4, height=4, cell_size=0.1, section_size=1.0)
-        self._build_gui()
+        self._build_gui(show_robot_mesh, show_smpl_mesh)
         self._redraw()
 
     @property
@@ -78,8 +98,44 @@ class CalibrationViewer:
         root = points["pelvis"]
         return {name: point - root for name, point in points.items()}
 
-    def _build_gui(self) -> None:
-        self.server.gui.add_markdown("# SMPL → URDF calibration\nBlue: calibrated SMPL targets · Red: robot link origins")
+    @property
+    def raw_human_vertices(self) -> np.ndarray | None:
+        if self.human.vertices is None:
+            return None
+        pelvis = self.human.by_name["pelvis"]
+        return self.human.vertices - pelvis
+
+    def _build_gui(self, show_robot_mesh: bool, show_smpl_mesh: bool) -> None:
+        self.server.gui.add_markdown(
+            "# SMPL → URDF calibration\n"
+            "Blue: SMPL · Red: robot link origins · Yellow: correspondence residuals"
+        )
+        with self.server.gui.add_folder("Visibility", expand_by_default=True):
+            self.show_robot_mesh = self.server.gui.add_checkbox(
+                "URDF model",
+                initial_value=show_robot_mesh
+                and (self.robot.visuals_loaded or self.robot.collisions_loaded),
+            )
+            self.show_smpl_mesh = self.server.gui.add_checkbox(
+                "SMPL body mesh", initial_value=show_smpl_mesh and self.human.vertices is not None
+            )
+            self.show_human_skeleton = self.server.gui.add_checkbox(
+                "SMPL skeleton", initial_value=True
+            )
+            self.show_robot_keypoints = self.server.gui.add_checkbox(
+                "Robot keypoints", initial_value=True
+            )
+            self.show_residuals = self.server.gui.add_checkbox(
+                "Residual lines", initial_value=True
+            )
+            for handle in (
+                self.show_robot_mesh,
+                self.show_smpl_mesh,
+                self.show_human_skeleton,
+                self.show_robot_keypoints,
+                self.show_residuals,
+            ):
+                handle.on_update(lambda _: self._visibility_changed())
         with self.server.gui.add_folder("Morphology", expand_by_default=True):
             self.controls = {}
             defaults = list(self.params.upper_scale) + list(self.params.lower_scale) + [
@@ -104,6 +160,24 @@ class CalibrationViewer:
                 handle.on_update(lambda _, key=name: self._joint_changed(key))
                 self.joint_controls[name] = handle
         with self.server.gui.add_folder("Diagnostics", expand_by_default=True):
+            if self.robot.visuals_loaded:
+                robot_mesh_status = "✅ URDF visual mesh loaded"
+            elif self.robot.collisions_loaded:
+                robot_mesh_status = (
+                    "⚠️ URDF visual mesh files unavailable; showing collision geometry instead"
+                )
+            else:
+                robot_mesh_status = (
+                    f"⚠️ URDF geometry unavailable: {self.robot.visual_error}"
+                )
+            smpl_mesh_status = (
+                "✅ SMPL body mesh loaded"
+                if self.human.vertices is not None
+                else "⚠️ SMPL body mesh unavailable: the pkl/model did not provide vertices and faces"
+            )
+            self.mesh_status_gui = self.server.gui.add_markdown(
+                f"{robot_mesh_status}\n\n{smpl_mesh_status}"
+            )
             self.metrics_gui = self.server.gui.add_markdown("Loading…")
             self.status_gui = self.server.gui.add_markdown("")
         export = self.server.gui.add_button("Export YAML", color="green")
@@ -124,8 +198,25 @@ class CalibrationViewer:
     def _joint_changed(self, name: str) -> None:
         self.joints[name] = float(self.joint_controls[name].value)
         self.robot.update(self.joints)
-        self.robot_vis.update_cfg(np.array([self.joints[n] for n in self.robot.actuated_joint_names]))
+        if self.robot_vis is not None:
+            self.robot_vis.update_cfg(
+                np.array([self.joints[n] for n in self.robot.actuated_joint_names])
+            )
         self._redraw()
+
+    def _visibility_changed(self) -> None:
+        if self.robot_root is not None:
+            self.robot_root.visible = bool(self.show_robot_mesh.value)
+        for handle_name, visible in (
+            ("smpl_mesh_handle", self.show_smpl_mesh.value),
+            ("human_points_handle", self.show_human_skeleton.value),
+            ("human_bones_handle", self.show_human_skeleton.value),
+            ("robot_points_handle", self.show_robot_keypoints.value),
+            ("residuals_handle", self.show_residuals.value),
+        ):
+            handle = getattr(self, handle_name, None)
+            if handle is not None:
+                handle.visible = bool(visible)
 
     def _auto_fit(self) -> None:
         names = list(self.robot.keypoint_links)
@@ -145,11 +236,46 @@ class CalibrationViewer:
         rmse = float(np.sqrt(np.mean(np.square(error)))) if error else float("nan")
         human_array = np.asarray([human[n] for n in human])
         robot_array = np.asarray([robot[n] for n in robot])
-        self.server.scene.add_point_cloud("/human/points", human_array, (55, 130, 255), point_size=0.025)
-        self.server.scene.add_line_segments("/human/bones", _segments(human, self.human.edges), (55, 130, 255), thickness=0.008)
-        self.server.scene.add_point_cloud("/robot/keypoints", robot_array, (245, 80, 70), point_size=0.027)
+        vertices = self.raw_human_vertices
+        if vertices is not None and self.human.faces is not None:
+            self.smpl_mesh_handle = self.server.scene.add_mesh_simple(
+                "/human/mesh",
+                vertices,
+                self.human.faces,
+                color=(55, 130, 255),
+                opacity=0.28,
+                side="double",
+                visible=bool(self.show_smpl_mesh.value),
+            )
+        self.human_points_handle = self.server.scene.add_point_cloud(
+            "/human/points",
+            human_array,
+            (55, 130, 255),
+            point_size=0.025,
+            visible=bool(self.show_human_skeleton.value),
+        )
+        self.human_bones_handle = self.server.scene.add_line_segments(
+            "/human/bones",
+            _segments(human, self.human.edges),
+            (55, 130, 255),
+            thickness=0.008,
+            visible=bool(self.show_human_skeleton.value),
+        )
+        self.robot_points_handle = self.server.scene.add_point_cloud(
+            "/robot_debug/keypoints",
+            robot_array,
+            (245, 80, 70),
+            point_size=0.027,
+            visible=bool(self.show_robot_keypoints.value),
+        )
         residual_lines = np.asarray([[human[n], robot[n]] for n in common])
-        self.server.scene.add_line_segments("/residuals", residual_lines, (245, 190, 45), thickness=0.003)
+        self.residuals_handle = self.server.scene.add_line_segments(
+            "/residuals",
+            residual_lines,
+            (245, 190, 45),
+            thickness=0.003,
+            visible=bool(self.show_residuals.value),
+        )
         self.metrics_gui.content = _metrics_markdown(human, robot, rmse)
 
     def _export(self) -> None:

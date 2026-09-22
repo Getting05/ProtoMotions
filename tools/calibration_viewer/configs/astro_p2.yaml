@@ -27,4 +27,6 @@ robot:
   t_pose_joint_positions:
     left_shoulder_roll_joint: 1.5708
     right_shoulder_roll_joint: -1.5708
-
+    # The elbow zero pose points the forearms forward; +90° straightens them laterally.
+    left_elbow_joint: 1.5708
+    right_elbow_joint: 1.5708

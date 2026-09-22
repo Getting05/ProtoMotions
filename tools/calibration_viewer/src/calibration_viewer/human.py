@@ -38,25 +38,45 @@ class HumanSkeleton:
     names: tuple[str, ...]
     points: np.ndarray
     edges: tuple[tuple[str, str], ...] = SMPL_EDGES
+    vertices: np.ndarray | None = None
+    faces: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         points = np.asarray(self.points, dtype=np.float64)
         if points.shape != (len(self.names), 3):
             raise ValueError(f"Expected ({len(self.names)}, 3) points, got {points.shape}")
         object.__setattr__(self, "points", points)
+        if (self.vertices is None) != (self.faces is None):
+            raise ValueError("SMPL mesh rendering requires both vertices and faces")
+        if self.vertices is not None:
+            vertices = np.asarray(self.vertices, dtype=np.float64)
+            faces = np.asarray(self.faces, dtype=np.int64)
+            if vertices.ndim != 2 or vertices.shape[1] != 3:
+                raise ValueError(f"Expected mesh vertices [V, 3], got {vertices.shape}")
+            if faces.ndim != 2 or faces.shape[1] != 3:
+                raise ValueError(f"Expected triangular mesh faces [F, 3], got {faces.shape}")
+            object.__setattr__(self, "vertices", vertices)
+            object.__setattr__(self, "faces", faces)
 
     @property
     def by_name(self) -> dict[str, np.ndarray]:
         return dict(zip(self.names, self.points, strict=True))
 
     def transformed(self, axes: Sequence[str]) -> "HumanSkeleton":
-        """Return points in robot coordinates [forward, left, up]."""
+        """Return joints and optional mesh in robot coordinates [forward, left, up]."""
         if len(axes) != 3:
             raise ValueError("axes must contain [forward, left, up]")
         basis = np.stack([_axis_vector(axis) for axis in axes], axis=0)
         if abs(np.linalg.det(basis)) < 0.5:
             raise ValueError(f"Coordinate axes are not independent: {axes}")
-        return HumanSkeleton(self.names, self.points @ basis.T, self.edges)
+        vertices = None if self.vertices is None else self.vertices @ basis.T
+        return HumanSkeleton(
+            self.names,
+            self.points @ basis.T,
+            edges=self.edges,
+            vertices=vertices,
+            faces=self.faces,
+        )
 
 
 def _axis_vector(value: str) -> np.ndarray:
@@ -86,15 +106,15 @@ def _array(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
-def _select_frame(points: np.ndarray, frame: int) -> np.ndarray:
-    points = np.asarray(points)
-    while points.ndim > 3 and points.shape[0] == 1:
-        points = points[0]
-    if points.ndim == 3:
-        points = points[frame]
-    if points.ndim != 2 or points.shape[-1] != 3:
-        raise ValueError(f"Joint array must end in [J, 3], got {points.shape}")
-    return points
+def _select_xyz_frame(values: np.ndarray, frame: int, label: str) -> np.ndarray:
+    values = np.asarray(values)
+    while values.ndim > 3 and values.shape[0] == 1:
+        values = values[0]
+    if values.ndim == 3:
+        values = values[frame]
+    if values.ndim != 2 or values.shape[-1] != 3:
+        raise ValueError(f"{label} array must end in [N, 3], got {values.shape}")
+    return values
 
 
 def _names_from_data(data: Mapping[str, Any], count: int) -> tuple[str, ...]:
@@ -111,7 +131,31 @@ def _names_from_data(data: Mapping[str, Any], count: int) -> tuple[str, ...]:
     )
 
 
-def _joints_from_model(data: Mapping[str, Any]) -> np.ndarray:
+def _faces_from_data(data: Mapping[str, Any]) -> np.ndarray | None:
+    for key in ("faces", "f", "triangles"):
+        if key in data:
+            faces = _array(data[key]).astype(np.int64)
+            if faces.ndim == 2 and faces.shape[1] == 3:
+                return faces
+    return None
+
+
+def _mesh_from_data(
+    data: Mapping[str, Any], frame: int
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    faces = _faces_from_data(data)
+    if faces is None:
+        return None, None
+    for key in ("vertices", "verts"):
+        if key in data:
+            vertices = _select_xyz_frame(_array(data[key]), frame, "Vertex")
+            return vertices.astype(np.float64), faces
+    return None, None
+
+
+def _geometry_from_model(
+    data: Mapping[str, Any]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     vertices = _array(data["v_template"]).astype(np.float64)
     shapedirs = data.get("shapedirs")
     betas = data.get("betas")
@@ -125,12 +169,12 @@ def _joints_from_model(data: Mapping[str, Any]) -> np.ndarray:
             n = min(dirs.shape[-1], beta.size)
             vertices = vertices + (dirs[:, :n] @ beta[:n]).reshape(vertices.shape)
     regressor = _array(data["J_regressor"]).astype(np.float64)
-    return regressor @ vertices
+    return regressor @ vertices, vertices, _faces_from_data(data)
 
 
 def _joints_from_smplx(
     data: Mapping[str, Any], model_path: Path, frame: int, gender: str
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     try:
         import smplx
         import torch
@@ -167,7 +211,11 @@ def _joints_from_smplx(
             betas=torch.as_tensor(betas, dtype=torch.float32)[None],
             transl=torch.as_tensor(transl, dtype=torch.float32)[None],
         )
-    return output.joints[0, :24].cpu().numpy()
+    return (
+        output.joints[0, :24].cpu().numpy(),
+        output.vertices[0].cpu().numpy(),
+        np.asarray(model.faces, dtype=np.int64),
+    )
 
 
 def load_smpl_pkl(
@@ -187,22 +235,34 @@ def load_smpl_pkl(
             raise TypeError(f"Expected a mapping in {path}, got {type(data).__name__}")
 
     points = None
+    vertices = None
+    faces = None
     for key in ("joints", "J", "keypoints", "joint_positions", "positions"):
         if key in data:
             candidate = _array(data[key])
             if candidate.shape[-1] == 3:
-                points = _select_frame(candidate, frame)
+                points = _select_xyz_frame(candidate, frame, "Joint")
                 break
+    vertices, faces = _mesh_from_data(data, frame)
     if points is None and "v_template" in data and "J_regressor" in data:
-        points = _joints_from_model(data)
-    if points is None and any(k in data for k in ("poses", "pose", "body_pose")):
+        points, model_vertices, model_faces = _geometry_from_model(data)
+        if model_faces is not None:
+            vertices, faces = model_vertices, model_faces
+    pose_data = any(k in data for k in ("poses", "pose", "body_pose"))
+    if pose_data and model_path is not None and (points is None or vertices is None):
+        posed_points, posed_vertices, posed_faces = _joints_from_smplx(
+            data, Path(model_path), frame, gender
+        )
+        if points is None:
+            points = posed_points
+        vertices, faces = posed_vertices, posed_faces
+    if points is None and pose_data:
         if model_path is None:
             raise ValueError("SMPL parameter pkl requires --smpl-model PATH")
-        points = _joints_from_smplx(data, Path(model_path), frame, gender)
     if points is None:
         raise ValueError(
             "Unsupported SMPL pkl. Expected joints/keypoints/positions, "
             "v_template + J_regressor, or pose parameters with --smpl-model."
         )
     names = _names_from_data(data, len(points))
-    return HumanSkeleton(names, points)
+    return HumanSkeleton(names, points, vertices=vertices, faces=faces)
