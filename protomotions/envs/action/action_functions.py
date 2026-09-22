@@ -275,7 +275,11 @@ def make_pd_action_config(
     """Create action config dict for normalized PD control.
 
     Helper to extract control parameters from robot config and return
-    a ready-to-use action config dict.
+    a ready-to-use action config dict. ``control.pd_action_center`` can opt into
+    the resolved default pose as the zero-action target. The legacy range-based
+    scale is retained independently of the center; targets may extend beyond
+    physical limits, just as with the historical midpoint parametrization.
+    Saved action configs/checkpoints are not migrated by this helper.
 
     Args:
         robot_config: Robot configuration with kinematic_info and control fields.
@@ -297,6 +301,24 @@ def make_pd_action_config(
         action_scale,
         torch.device("cpu"),
     )
+
+    center_mode = getattr(robot_config.control, "pd_action_center", "limit_midpoint")
+    if center_mode == "default_pose":
+        default_pose = torch.as_tensor(
+            robot_config.default_dof_pos, dtype=pd_action_offset.dtype,
+            device=pd_action_offset.device,
+        )
+        lower = robot_config.kinematic_info.dof_limits_lower.to(default_pose)
+        upper = robot_config.kinematic_info.dof_limits_upper.to(default_pose)
+        if default_pose.shape != pd_action_offset.shape:
+            raise ValueError("PD default pose must have one value per DOF")
+        if not torch.isfinite(default_pose).all():
+            raise ValueError("PD default pose must be finite")
+        if torch.any(default_pose < lower) or torch.any(default_pose > upper):
+            raise ValueError("PD default pose must lie within physical joint limits")
+        pd_action_offset = default_pose.clone()
+    elif center_mode != "limit_midpoint":
+        raise ValueError(f"Unknown PD action center: {center_mode!r}")
 
     joint_names = robot_config.kinematic_info.dof_names
     stiffness = torch.tensor(

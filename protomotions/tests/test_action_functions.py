@@ -191,6 +191,64 @@ def test_make_pd_action_config_builds_normalized_action_config_from_robot_data()
     assert torch.equal(config["damping"], torch.tensor([1.0, 2.0, 4.0, 5.0, 10.0]))
 
 
+def test_normalized_pd_default_pose_center_preserves_scales_and_limits():
+    robot = _mixed_dof_robot_config()
+    legacy = make_pd_action_config(robot)
+    lower = robot.kinematic_info.dof_limits_lower.clone()
+    upper = robot.kinematic_info.dof_limits_upper.clone()
+    robot.control.pd_action_center = "default_pose"
+    config = make_pd_action_config(robot)
+    assert torch.equal(config["pd_action_offset"], robot.default_dof_pos)
+    _assert_no_storage_alias(config["pd_action_offset"], robot.default_dof_pos)
+    assert torch.equal(config["pd_action_scale"], legacy["pd_action_scale"])
+    assert torch.equal(robot.kinematic_info.dof_limits_lower, lower)
+    assert torch.equal(robot.kinematic_info.dof_limits_upper, upper)
+    fn = config.pop("fn")
+    assert torch.equal(fn(torch.zeros(2, 5), **config)["processed_action"], robot.default_dof_pos.expand(2, -1))
+
+
+@pytest.mark.parametrize("bad_pose", [torch.zeros(4), torch.full((5,), float("nan")), torch.full((5,), 100.0)])
+def test_normalized_pd_rejects_invalid_default_pose(bad_pose):
+    robot = _mixed_dof_robot_config()
+    robot.control.pd_action_center = "default_pose"
+    robot.default_dof_pos = bad_pose
+    with pytest.raises(ValueError, match="PD default pose"):
+        make_pd_action_config(robot)
+
+
+def test_normalized_pd_rejects_unknown_center():
+    robot = _mixed_dof_robot_config()
+    robot.control.pd_action_center = "typo"
+    with pytest.raises(ValueError, match="Unknown PD action center"):
+        make_pd_action_config(robot)
+
+
+def test_p2_all_dofs_use_default_pose_and_retain_physical_limits():
+    from protomotions.robot_configs.astro_p2 import AstroP2RobotConfig
+    robot = AstroP2RobotConfig()
+    kin = robot.kinematic_info
+    lower, upper = kin.dof_limits_lower.clone(), kin.dof_limits_upper.clone()
+    legacy_offset, legacy_scale = build_pd_action_offset_scale(
+        kin.hinge_axes_map, lower, upper, 1.0, torch.device("cpu")
+    )
+    config = make_pd_action_config(robot)
+    assert len(config["pd_action_offset"]) == 30
+    assert torch.equal(config["pd_action_offset"], robot.default_dof_pos)
+    assert torch.equal(config["pd_action_scale"], legacy_scale)
+    assert torch.isfinite(config["pd_action_scale"]).all()
+    assert (config["pd_action_scale"] > 0).all()
+    assert torch.all(robot.default_dof_pos - legacy_scale <= lower)
+    assert torch.all(robot.default_dof_pos + legacy_scale >= upper)
+    assert torch.equal(kin.dof_limits_lower, lower)
+    assert torch.equal(kin.dof_limits_upper, upper)
+    for side, old in [("left", 1.05), ("right", -1.05)]:
+        j = kin.dof_names.index(f"{side}_hip_yaw_joint")
+        assert legacy_offset[j].item() == pytest.approx(old, abs=1e-6)
+        assert config["pd_action_offset"][j].item() == 0
+    fn = config.pop("fn")
+    assert torch.equal(fn(torch.zeros(3, 30), **config)["processed_action"], robot.default_dof_pos.expand(3, -1))
+
+
 def test_make_bm_pd_action_config_uses_default_pose_and_effort_over_stiffness_scale():
     robot_config = _mixed_dof_robot_config()
 

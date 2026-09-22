@@ -6,6 +6,7 @@ from typing import Tuple, TypedDict
 import glob
 import os
 import argparse
+import json
 from pathlib import Path
 import sys
 
@@ -27,6 +28,47 @@ from protomotions.utils.retargeting_fps import fps_from_mapping, subsampled_fps 
 ASTRO_P2_LINK_NAMES = None
 N_retarget = 15
 N_AUX = 3
+RETARGET_VERSION = "p2-pyroki-wrist-v3"
+
+
+def p2_smpl_hand_aux(wrist_positions, wrist_orientations, side):
+    """SMPL wrist->hand direction, expressed as P2's +X palm-center point.
+
+    The canonical SMPL MJCF hand offsets are lateral, not wrist-local +X.
+    Rebuild this point AFTER body scaling so it has P2's actual 0.11 m length.
+    Do not constrain a second palm normal or change the shared keypoint files.
+    """
+    offsets = {"left": [-0.0149, 0.084, -0.0082],
+               "right": [-0.0103, -0.0846, -0.0061]}
+    direction = onp.asarray(offsets[side], dtype=float)
+    direction /= onp.linalg.norm(direction)
+    return wrist_positions + 0.11 * onp.einsum("...ij,j->...i", wrist_orientations, direction)
+
+
+def build_p2_collision_model(urdf):
+    """Native PyRoki capsules with P2's structural adjacency exclusions.
+
+    URDF uses collisionless intermediate yaw/pitch/fixed links. PyRoki otherwise
+    treats their zero-size placeholder capsules as real collision geometry and
+    misses adjacency across them. Ignore placeholders and consecutive physical
+    collision bodies, never arbitrary pairs selected from a solved motion.
+    """
+    names = list(urdf.link_map)
+    physical = {n for n in names if urdf.link_map[n].collisions}
+    ignore = {(a, b) for i, a in enumerate(names) for b in names[i+1:]
+              if a not in physical or b not in physical}
+    parents = {j.child: j.parent for j in urdf.joint_map.values()}
+    for child in physical:
+        parent = parents.get(child)
+        while parent is not None and parent not in physical:
+            parent = parents.get(parent)
+        if parent is not None:
+            ignore.add((parent, child))
+    # Waist and proximal hip envelopes meet at the pelvis. Their single-link
+    # bounding capsules overlap structurally; retain all distal arm/leg pairs.
+    ignore.update({("waist_roll_link", "left_hip_roll_link"),
+                   ("waist_roll_link", "right_hip_roll_link")})
+    return pk.collision.RobotCollision.from_urdf(urdf, user_ignore_pairs=tuple(sorted(ignore)))
 
 # for the local bones alignment cost
 direct_pairs = [
@@ -265,6 +307,12 @@ def load_motion_data(
         raise ValueError(f"Invalid source type: {source_type}")
 
     keypoint_orientations = processed_orientations[::subsample_factor]
+
+    if source_type == "smpl":
+        for side, wrist_idx, aux_idx in [("left", 13, 15), ("right", 14, 16)]:
+            simplified_keypoints[:, aux_idx] = p2_smpl_hand_aux(
+                simplified_keypoints[:, wrist_idx], keypoint_orientations[:, wrist_idx], side
+            )
 
     # Subsample the smoothed contact flags
     left_foot_contact = left_foot_contacts_smoothed[::subsample_factor]
@@ -531,8 +579,7 @@ def main():
     urdf = yourdfpy.URDF.load(urdf_path, mesh_dir=urdf_mesh_dir)
 
     robot = pk.Robot.from_urdf(urdf)
-    # robot_coll = pk.collision.RobotCollision.from_urdf(urdf)
-    robot_coll = None
+    robot_coll = build_p2_collision_model(urdf)
 
     if ASTRO_P2_LINK_NAMES is None:
         ASTRO_P2_LINK_NAMES = list(robot.links.names)
@@ -560,7 +607,7 @@ def main():
         global_alignment=4.0,
         root_smoothness=1.0,
         joint_smoothness=4.0,
-        self_collision=0.0,  # turned off for now
+        self_collision=20.0,
         joint_rest_penalty=1.0,
         joint_vel_limit=50.0,
         foot_contact=30.0,
@@ -716,8 +763,13 @@ def main():
             output_path = os.path.join(output_dir, output_filename)
 
             if args.skip_existing and os.path.exists(output_path):
-                print(f"Output file {output_filename} already exists, skipping...")
-                continue
+                with onp.load(output_path, allow_pickle=False) as previous:
+                    current = ("retarget_version" in previous and
+                               str(previous["retarget_version"].item()) == RETARGET_VERSION)
+                if current:
+                    print(f"Output file {output_filename} has current version, skipping...")
+                    continue
+                print(f"Re-solving stale pre-fix output: {output_filename}")
 
             (
                 simplified_keypoints,
@@ -750,6 +802,7 @@ def main():
 
             # Save results, sliced to the actual motion length
             results_to_save = {
+                "retarget_version": onp.asarray(RETARGET_VERSION),
                 "base_frame_pos": onp.array(Ts_world_root.wxyz_xyz[:num_timesteps, 4:]),
                 "base_frame_wxyz": onp.array(
                     Ts_world_root.wxyz_xyz[:num_timesteps, :4]
@@ -765,6 +818,25 @@ def main():
             }
 
             onp.savez_compressed(output_path, **results_to_save)
+            distances = onp.asarray(robot_coll.compute_self_collision_distance(
+                robot, joints[:num_timesteps]
+            ))
+            report = {
+                "backend": "pyroki.RobotCollision",
+                "collision_geometry": "URDF link capsules fitted by PyRoki",
+                "active_pairs": len(robot_coll.active_idx_i),
+                "frames": num_timesteps,
+                "min_distance_m": float(distances.min()),
+                "penetrating_frames_1mm": int(onp.any(distances < -0.001, axis=-1).sum()),
+                "pairs_below_minus_1mm": [
+                    {"links": [robot_coll.link_names[robot_coll.active_idx_i[k]],
+                               robot_coll.link_names[robot_coll.active_idx_j[k]]],
+                     "min_distance_m": float(distances[:, k].min())}
+                    for k in onp.flatnonzero(onp.min(distances, axis=0) < -0.001)
+                ],
+            }
+            Path(output_path).with_suffix(".collision.json").write_text(json.dumps(report, indent=2))
+            print(json.dumps(report), flush=True)
             print(f"Saved retargeted motion to {output_path}")
 
 
@@ -1217,13 +1289,13 @@ def solve_retargeting(
             subsample_factor / input_fps,  # dt in seconds (accounting for subsampling)
             weights["joint_vel_limit"],
         ),
-        # pk.costs.self_collision_cost(
-        #     jax.tree.map(lambda x: x[None], robot),
-        #     jax.tree.map(lambda x: x[None], robot_coll),
-        #     var_joints,
-        #     margin=0.01,
-        #     weight=weights["self_collision"],
-        # ),
+        pk.costs.self_collision_cost(
+            jax.tree.map(lambda x: x[None], robot),
+            jax.tree.map(lambda x: x[None], robot_coll),
+            var_joints,
+            margin=0.005,
+            weight=weights["self_collision"],
+        ),
     ]
 
     # Add foot contact costs for each timestep (using v2) - start from t=1 since we need previous timestep

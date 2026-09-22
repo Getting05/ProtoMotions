@@ -29,7 +29,9 @@ class VideoTests(unittest.TestCase):
             current_epoch=200,
             fabric=NS(global_rank=0, device=NS(index=0), loggers=[]),
             env=NS(
-                motion_lib=NS(motion_file="/data/amass_g1_00.pt"),
+                motion_lib=NS(
+                    motion_file="/data/amass_g1_00.pt", num_motions=lambda: 1
+                ),
                 scene_lib=NS(config=NS(scene_file=None)),
             ),
         )
@@ -213,6 +215,20 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(record["videos/best_policy"], "encoded-video")
         self.assertIsNone(self.recorder.job)
         self.assertTrue((folder / "best_policy.mp4").exists())
+        with patch.dict(
+            sys.modules, {"wandb": wandb, "lightning.pytorch.loggers": loggers}
+        ):
+            for index in (1, 2):
+                self.recorder.job = {"folder": folder, "index": index}
+                try:
+                    self.recorder._upload(250)
+                finally:
+                    self.recorder.job = None
+                record = logger.experiment.log.call_args.args[0]
+                key = f"videos/best_policy_random_{index}"
+                self.assertEqual(record[key], "encoded-video")
+                self.assertEqual(record[f"{key}/motion_id"], 0)
+                self.assertEqual(record["trainer/global_step"], 250)
 
     def test_launch_failure_does_not_escape_or_leave_snapshot(self):
         self.best()
@@ -255,6 +271,64 @@ class VideoTests(unittest.TestCase):
         self.assertNotEqual(self.recorder.job["folder"], folder)
         self.assertEqual((folder / "best_policy.mp4").read_bytes(), b"previous video")
         process.poll.return_value = 1
+
+    def test_random_selection_unique_excludes_fixed_and_small_libraries(self):
+        import random
+
+        from protomotions.utils.wandb_video import select_video_motions
+
+        for fixed in (0, 5, 9):
+            ids = select_video_motions(10, fixed, random.Random(3))
+            self.assertEqual(ids[0], fixed)
+            self.assertEqual(len(set(ids)), 3)
+            self.assertTrue(all(0 <= i < 10 for i in ids))
+        self.assertEqual(select_video_motions(1, 0), [0])
+        self.assertEqual(select_video_motions(2, 0), [0, 1])
+        with self.assertRaises(ValueError):
+            select_video_motions(0, 0)
+
+    def test_three_motion_batch_same_snapshot_failure_continues_and_keys(self):
+        self.best()
+        self.agent.env.motion_lib.num_motions = lambda: 10
+        processes = [Mock(pid=i + 100) for i in range(3)]
+        for process in processes:
+            process.poll.return_value = None
+        with patch(
+            "protomotions.utils.wandb_video.subprocess.Popen", side_effect=processes
+        ) as popen, patch.object(self.recorder, "_upload") as upload:
+            self.recorder.tick(self.agent)
+            scratch = self.recorder.job["scratch"]
+            motions = self.recorder.job["motions"]
+            self.assertEqual(motions[0], 0)
+            self.assertEqual(len(set(motions)), 3)
+            (self.root / "score_based.ckpt").write_bytes(b"new checkpoint")
+            for index in range(3):
+                self.assertEqual(popen.call_count, index + 1)
+                request = json.loads((scratch / "request.json").read_text())
+                self.assertEqual(request["wandb_video_motion_id"], motions[index])
+                self.assertEqual(
+                    (scratch / "score_based.ckpt").read_bytes(), b"best model"
+                )
+                processes[index].poll.return_value = 1 if index == 1 else 0
+                self.agent.current_epoch = 230 + index
+                self.recorder.tick(self.agent)
+            self.assertEqual(upload.call_count, 2)
+            self.assertIsNone(self.recorder.job)
+            self.assertFalse(scratch.exists())
+
+    def test_close_does_not_launch_remaining_motions(self):
+        self.best()
+        self.agent.env.motion_lib.num_motions = lambda: 10
+        process = Mock()
+        process.poll.return_value = None
+        with patch(
+            "protomotions.utils.wandb_video.subprocess.Popen", return_value=process
+        ) as popen, patch.object(self.recorder, "_upload"):
+            self.recorder.tick(self.agent)
+            process.poll.return_value = 0
+            self.recorder.close()
+            self.assertEqual(popen.call_count, 1)
+            self.assertIsNone(self.recorder.job)
 
 
 if __name__ == "__main__":

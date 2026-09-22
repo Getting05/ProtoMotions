@@ -75,3 +75,26 @@ encoder in the same Python environment. Use an available GPU, or reduce resoluti
 and frequency if resource pressure causes failures. First shader compilation can
 exceed the default timeout; adjust `--wandb-video-timeout` if necessary. No
 additional simulator or W&B process is launched when the feature is disabled.
+
+## Fixed plus random motion videos
+
+Each interval now records the configured fixed motion (default 0), followed by
+two different uniformly sampled motions from rank 0's active library. The random
+motions exclude the fixed ID; sampling uses a separate system RNG and does not
+alter training randomness. Libraries with fewer than three motions record all
+available distinct motions and emit a warning. Across intervals, random IDs may
+repeat. No extra CLI options are required.
+
+All three videos share the same checkpoint/config snapshot and resolved motion
+shard. They render sequentially, with at most one child process alive. The existing
+300-second timeout applies separately to each video. A rendering/upload failure
+skips that motion and continues with the remaining motions; a batch still running
+at the next interval causes that new interval to be skipped. At shutdown no more
+motions are launched.
+
+The fixed video remains at `videos/best_policy`; extras use
+`videos/best_policy_random_1` and `videos/best_policy_random_2` in the same W&B run,
+with their own motion ID and checkpoint metadata. Extra local outputs are in
+`videos/epoch_XXXXXXXX/random_N_motion_ID/`. The blue translucent reference overlay
+is retained for every motion. Since this changes the training-side scheduler,
+existing training processes must be resumed/restarted to use the three-video batch.

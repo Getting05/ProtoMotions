@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import random
 import shutil
 import signal
 import subprocess
@@ -155,6 +156,16 @@ def worker_environment(environ, gpu):
     return env
 
 
+def select_video_motions(count, fixed, rng=None):
+    """Sample two distinct extra motions without consuming training RNG state."""
+    if not 0 <= fixed < count:
+        raise ValueError(f"Video motion {fixed} is outside library of {count} motions")
+    rng = rng or random.SystemRandom()
+    # Map samples around the fixed ID without allocating a full library list.
+    extra = rng.sample(range(count - 1), min(2, count - 1))
+    return [fixed] + [i if i < fixed else i + 1 for i in extra]
+
+
 class BestPolicyVideoRecorder:
     """One subprocess at a time. All failures stay outside training collectives."""
 
@@ -227,11 +238,40 @@ class BestPolicyVideoRecorder:
             "scene_file": str(Path(scene_file).resolve()) if scene_file else None,
             "output": str(folder / "best_policy.mp4"),
         }
+        motions = select_video_motions(
+            agent.env.motion_lib.num_motions(), self.options["wandb_video_motion_id"]
+        )
+        if len(motions) < 3:
+            log.warning("Only %s distinct video motions available", len(motions))
+        self.job.update(
+            batch_folder=folder,
+            request=request,
+            motions=motions,
+            index=0,
+        )
+        self._launch_motion()
+
+    def _launch_motion(self):
+        job = self.job
+        scratch = job["scratch"]
+        index = job["index"]
+        motion = job["motions"][index]
+        folder = job["batch_folder"]
+        if index:
+            folder = folder / f"random_{index}_motion_{motion}"
+            folder.mkdir()
+        job["folder"] = folder
+        job["started"] = time.monotonic()
+        request = {
+            **job["request"],
+            "wandb_video_motion_id": motion,
+            "output": str(folder / "best_policy.mp4"),
+        }
         request_file = scratch / "request.json"
         request_file.write_text(json.dumps(request))
         gpu = self.options["wandb_video_gpu"]
         if gpu is None:
-            gpu = agent.fabric.device.index or 0
+            gpu = self.agent.fabric.device.index or 0
         env = worker_environment(os.environ, gpu)
         command = [
             sys.executable,
@@ -273,68 +313,87 @@ class BestPolicyVideoRecorder:
         timer.start()
         log.info(
             "Rendering best-policy video for epoch %s in background",
-            agent.current_epoch,
+            request["trigger_epoch"],
         )
 
-    def _poll(self, current_epoch):
-        if self.job is None:
+    def _poll(self, current_epoch, advance=True):
+        if self.job is None or self.job["process"] is None:
             return
         process = self.job["process"]
-        if process is None:
-            return
         status = process.poll()
         if status is None:
             if (
                 time.monotonic() - self.job["started"]
-                > self.options["wandb_video_timeout"]
+                <= self.options["wandb_video_timeout"]
             ):
-                log.warning(
-                    "Best-policy video timed out; see %s",
-                    self.job["folder"] / "render.log",
-                )
-                self._discard_job()
-            return
+                return
+            log.warning("Best-policy video timed out: %s", self.job["folder"])
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+            status = -9
+        self.job["timer"].cancel()
+        self.job["timer"] = None
+        self.job["process"] = None
         folder = self.job["folder"]
         try:
             if status != 0:
                 raise RuntimeError(
                     f"Renderer exited {status}; see {folder / 'render.log'}"
                 )
-            metadata = json.loads((folder / "best_policy.json").read_text())
-            video = folder / "best_policy.mp4"
-            if not video.is_file() or not video.stat().st_size:
-                raise RuntimeError("Renderer produced no video")
-            import wandb
-            from lightning.pytorch.loggers import WandbLogger
-
-            logger = next(
-                x for x in self.agent.fabric.loggers if isinstance(x, WandbLogger)
+            self._upload(current_epoch)
+        except Exception:
+            log.warning(
+                "Best-policy motion video failed; continuing batch", exc_info=True
             )
-            caption = (
-                f"trigger epoch={metadata['trigger_epoch']}, best epoch={metadata['best_epoch']}, "
-                f"score={metadata['best_score']}, motion={metadata['motion_id']}"
-            )
-            # Lightning uses trainer/global_step; avoid setting W&B's internal history step.
-            logger.experiment.log(
-                {
-                    "videos/best_policy": wandb.Video(
-                        str(video), format="mp4", caption=caption
-                    ),
-                    "trainer/global_step": current_epoch,
-                    **{
-                        f"videos/{k}": metadata[k]
-                        for k in (
-                            "trigger_epoch",
-                            "best_epoch",
-                            "best_score",
-                            "motion_id",
-                        )
-                    },
-                }
-            )
-            log.info("Uploaded best-policy video: %s", video)
         finally:
-            self._discard_job()
+            (folder / "best_policy.partial.mp4").unlink(missing_ok=True)
+            if advance and self.job["index"] + 1 < len(self.job["motions"]):
+                self.job["index"] += 1
+                self.job["process"] = None
+                self._launch_motion()
+            else:
+                self._discard_job()
+
+    def _upload(self, current_epoch):
+        folder = self.job["folder"]
+        index = self.job["index"]
+        key = (
+            "videos/best_policy" if index == 0 else f"videos/best_policy_random_{index}"
+        )
+        metadata = json.loads((folder / "best_policy.json").read_text())
+        video = folder / "best_policy.mp4"
+        if not video.is_file() or not video.stat().st_size:
+            raise RuntimeError("Renderer produced no video")
+        import wandb
+        from lightning.pytorch.loggers import WandbLogger
+
+        logger = next(
+            x for x in self.agent.fabric.loggers if isinstance(x, WandbLogger)
+        )
+        caption = (
+            f"trigger epoch={metadata['trigger_epoch']}, best epoch={metadata['best_epoch']}, "
+            f"score={metadata['best_score']}, motion={metadata['motion_id']}"
+        )
+        # Lightning uses trainer/global_step; avoid setting W&B's internal history step.
+        logger.experiment.log(
+            {
+                key: wandb.Video(str(video), format="mp4", caption=caption),
+                "trainer/global_step": current_epoch,
+                **{
+                    (f"videos/{k}" if index == 0 else f"{key}/{k}"): metadata[k]
+                    for k in (
+                        "trigger_epoch",
+                        "best_epoch",
+                        "best_score",
+                        "motion_id",
+                    )
+                },
+            }
+        )
+        log.info("Uploaded best-policy video: %s", video)
 
     def _discard_job(self):
         job, self.job = self.job, None
@@ -354,7 +413,7 @@ class BestPolicyVideoRecorder:
 
     def close(self):
         try:
-            self._poll(self.agent.current_epoch)
+            self._poll(self.agent.current_epoch, advance=False)
         except Exception:
             log.warning("Could not upload final best-policy video", exc_info=True)
         finally:

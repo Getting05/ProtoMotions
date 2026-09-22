@@ -128,6 +128,11 @@ class ControlConfig:
     # the positional limits used for rewards
     soft_pos_limit: float = 0.9
 
+    # Center of normalized PD targets. Keep the historical behavior by default;
+    # robots with asymmetric limits may opt into their resolved standing pose.
+    # This changes action semantics, not the physical joint limits or gains.
+    pd_action_center: str = "limit_midpoint"
+
     # The following field is loaded post-init and populated from the MJCF asset
     # Note: Using Field(init=False) to exclude from __init__ signature
     control_info: Dict[str, ControlInfo] = field(init=False)

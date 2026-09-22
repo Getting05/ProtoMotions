@@ -224,6 +224,7 @@ class AstroP2RobotConfig(RobotConfig):
         "left_shoulder_pitch_joint": 0.2, "right_shoulder_pitch_joint": 0.2,
     })
     control: ControlConfig = field(default_factory=lambda: ControlConfig(
+        pd_action_center="default_pose",
         override_control_info={name: ControlInfo(**values) for name, values in CONTROL_PARAMETERS.items()}
     ))
     simulation_params: SimulatorParams = field(default_factory=lambda: SimulatorParams(
