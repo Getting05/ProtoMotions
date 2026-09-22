@@ -7,7 +7,7 @@
 # IMPORTANT: ProtoMotions and PyRoki require separate Python environments.
 # You must provide paths to both Python interpreters.
 #
-# Usage: ./scripts/retarget_amass_to_robot.sh <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--clean]
+# Usage: ./scripts/retarget_amass_to_robot.sh <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--retarget-device cpu|gpu] [--retarget-gpus 0,1,...] [--output-root DIR] [--clean]
 #
 # Example:
 #   ./scripts/retarget_amass_to_robot.sh \
@@ -28,7 +28,7 @@ set -e  # Exit on error
 
 # Parse arguments
 if [ $# -lt 4 ]; then
-    echo "Usage: $0 <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--clean]"
+    echo "Usage: $0 <proto_python> <pyroki_python> <amass_pt_file> <robot_type> [skip_freq] [--source-skeleton smpl|smplx] [--retarget-device cpu|gpu] [--clean]"
     echo ""
     echo "Arguments:"
     echo "  proto_python   Path to Python interpreter with ProtoMotions installed"
@@ -37,6 +37,9 @@ if [ $# -lt 4 ]; then
     echo "  robot_type     Target robot: 'g1', 'h1_2', 'astro_p2', or 'p2'"
     echo "  skip_freq      (Optional) Skip every N motions (default: 1 = all motions)"
     echo "  --source-skeleton  Packaged source skeleton: smpl or smplx (default: smpl)"
+    echo "  --retarget-device  PyRoki solve device: cpu or gpu (default: cpu)"
+    echo "  --retarget-gpus    Comma-separated GPUs for parallel Astro P2 retargeting"
+    echo "  --output-root      Directory for this input's intermediates and final MotionLib"
     echo "  --clean        (Optional) Remove all intermediate outputs before running"
     echo ""
     echo "Example:"
@@ -52,6 +55,9 @@ shift 4
 SKIP_FREQ="1"
 CLEAN=""
 SOURCE_SKELETON="smpl"
+RETARGET_DEVICE="cpu"
+RETARGET_GPUS=""
+PIPELINE_OUTPUT_ROOT=""
 SKIP_SET="false"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -65,6 +71,30 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             SOURCE_SKELETON="$2"
+            shift 2
+            ;;
+        --retarget-device)
+            if [ $# -lt 2 ]; then
+                echo "Error: --retarget-device requires cpu or gpu"
+                exit 1
+            fi
+            RETARGET_DEVICE="$2"
+            shift 2
+            ;;
+        --retarget-gpus)
+            if [ $# -lt 2 ]; then
+                echo "Error: --retarget-gpus requires a comma-separated GPU list"
+                exit 1
+            fi
+            RETARGET_GPUS="$2"
+            shift 2
+            ;;
+        --output-root)
+            if [ $# -lt 2 ]; then
+                echo "Error: --output-root requires a directory"
+                exit 1
+            fi
+            PIPELINE_OUTPUT_ROOT="$2"
             shift 2
             ;;
         *)
@@ -82,6 +112,16 @@ done
 
 if [ "$SOURCE_SKELETON" != "smpl" ] && [ "$SOURCE_SKELETON" != "smplx" ]; then
     echo "Error: --source-skeleton must be 'smpl' or 'smplx'"
+    exit 1
+fi
+
+if [ "$RETARGET_DEVICE" != "cpu" ] && [ "$RETARGET_DEVICE" != "gpu" ]; then
+    echo "Error: --retarget-device must be 'cpu' or 'gpu'"
+    exit 1
+fi
+
+if [ -n "$RETARGET_GPUS" ] && [ "$ROBOT_TYPE" != "astro_p2" ] && [ "$ROBOT_TYPE" != "p2" ]; then
+    echo "Error: --retarget-gpus is currently supported for astro_p2/p2"
     exit 1
 fi
 
@@ -106,10 +146,7 @@ fi
 # This server's system cuDNN may be older than the version required by JAX.
 PYROKI_SITE_PACKAGES="$($PYROKI_PYTHON -c 'import site; print(site.getsitepackages()[0])')"
 PYROKI_CUDA_LIBS=""
-for CUDA_LIB_DIR in \
-    "$PYROKI_SITE_PACKAGES/nvidia/cudnn/lib" \
-    "$PYROKI_SITE_PACKAGES/nvidia/cublas/lib" \
-    "$PYROKI_SITE_PACKAGES/nvidia/cuda_nvrtc/lib"; do
+for CUDA_LIB_DIR in "$PYROKI_SITE_PACKAGES"/nvidia/*/lib; do
     if [ -d "$CUDA_LIB_DIR" ]; then
         PYROKI_CUDA_LIBS="${PYROKI_CUDA_LIBS:+$PYROKI_CUDA_LIBS:}$CUDA_LIB_DIR"
     fi
@@ -119,6 +156,14 @@ if [ -n "$PYROKI_CUDA_LIBS" ]; then
 fi
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
+run_pyroki() {
+    if [ "$RETARGET_DEVICE" == "cpu" ]; then
+        JAX_PLATFORMS="cpu" "$PYROKI_PYTHON" "$@"
+    else
+        "$PYROKI_PYTHON" "$@"
+    fi
+}
+
 # Validate input file exists
 if [ ! -f "$AMASS_PT_FILE" ]; then
     echo "Error: AMASS .pt file not found: $AMASS_PT_FILE"
@@ -126,7 +171,12 @@ if [ ! -f "$AMASS_PT_FILE" ]; then
 fi
 
 # Output directories are in the same location as input.
-OUTPUT_DIR="$(dirname "$AMASS_PT_FILE")"
+if [ -n "$PIPELINE_OUTPUT_ROOT" ]; then
+    OUTPUT_DIR="$PIPELINE_OUTPUT_ROOT"
+    mkdir -p "$OUTPUT_DIR"
+else
+    OUTPUT_DIR="$(dirname "$AMASS_PT_FILE")"
+fi
 KEYPOINTS_DIR="${OUTPUT_DIR}/keypoints-for-retarget"
 RETARGETED_DIR="${OUTPUT_DIR}/pyroki-retargeted-${ROBOT_TYPE}"
 CONTACTS_DIR="${OUTPUT_DIR}/contacts"
@@ -159,6 +209,10 @@ echo "Input:               $AMASS_PT_FILE"
 echo "Output dir:          $OUTPUT_DIR"
 echo "Skip freq:           $SKIP_FREQ (1 = all motions)"
 echo "Source skeleton:     $SOURCE_SKELETON"
+echo "Retarget device:     $RETARGET_DEVICE"
+if [ -n "$RETARGET_GPUS" ]; then
+    echo "Parallel GPUs:       $RETARGET_GPUS"
+fi
 echo "=============================================="
 
 # Step 1: Extract keypoints from packaged MotionLib (uses ProtoMotions)
@@ -175,7 +229,7 @@ $PROTO_PYTHON data/scripts/extract_retargeting_input_keypoints_from_packaged_mot
 echo ""
 echo "[Step 2/5] Running PyRoki retargeting to ${ROBOT_TYPE^^}..."
 if [ "$ROBOT_TYPE" == "g1" ]; then
-    $PYROKI_PYTHON pyroki/batch_retarget_to_g1_from_keypoints.py \
+    run_pyroki pyroki/batch_retarget_to_g1_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \
@@ -183,7 +237,7 @@ if [ "$ROBOT_TYPE" == "g1" ]; then
         --no-visualize \
         --skip-existing
 elif [ "$ROBOT_TYPE" == "h1_2" ]; then
-    $PYROKI_PYTHON pyroki/batch_retarget_to_h1_2_from_keypoints.py \
+    run_pyroki pyroki/batch_retarget_to_h1_2_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \
@@ -191,20 +245,27 @@ elif [ "$ROBOT_TYPE" == "h1_2" ]; then
         --no-visualize \
         --skip-existing
 else
-    $PYROKI_PYTHON pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
-        --subsample-factor 1 \
-        --keypoints-folder-path "$KEYPOINTS_DIR" \
-        --source-type smpl \
-        --output-dir "$RETARGETED_DIR" \
-        --no-visualize \
-        --skip-existing
+    if [ -n "$RETARGET_GPUS" ]; then
+        ASTRO_P2_GPUS="$RETARGET_GPUS" scripts/run_astro_p2_retarget_multi_gpu.sh \
+            "$PYROKI_PYTHON" "$KEYPOINTS_DIR" "$RETARGETED_DIR" \
+            --subsample-factor 1 \
+            --source-type smpl
+    else
+        run_pyroki pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
+            --subsample-factor 1 \
+            --keypoints-folder-path "$KEYPOINTS_DIR" \
+            --source-type smpl \
+            --output-dir "$RETARGETED_DIR" \
+            --no-visualize \
+            --skip-existing
+    fi
 fi
 
 # Step 3: Extract contact labels from source motions (uses PyRoki)
 echo ""
 echo "[Step 3/5] Extracting foot contact labels from source SMPL motions..."
 if [ "$ROBOT_TYPE" == "g1" ]; then
-    $PYROKI_PYTHON pyroki/batch_retarget_to_g1_from_keypoints.py \
+    run_pyroki pyroki/batch_retarget_to_g1_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \
@@ -212,7 +273,7 @@ if [ "$ROBOT_TYPE" == "g1" ]; then
         --contacts-dir "$CONTACTS_DIR" \
         --skip-existing
 elif [ "$ROBOT_TYPE" == "h1_2" ]; then
-    $PYROKI_PYTHON pyroki/batch_retarget_to_h1_2_from_keypoints.py \
+    run_pyroki pyroki/batch_retarget_to_h1_2_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \
@@ -220,7 +281,7 @@ elif [ "$ROBOT_TYPE" == "h1_2" ]; then
         --contacts-dir "$CONTACTS_DIR" \
         --skip-existing
 else
-    $PYROKI_PYTHON pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
+    run_pyroki pyroki/batch_retarget_to_astro_p2_from_keypoints.py \
         --subsample-factor 1 \
         --keypoints-folder-path "$KEYPOINTS_DIR" \
         --source-type smpl \

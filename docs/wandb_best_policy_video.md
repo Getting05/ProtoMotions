@@ -41,7 +41,14 @@ refers to rank 0's active shard at the trigger epoch; the exact path is recorded
 
 The policy uses deterministic actions where the model exposes `mean_action`,
 starts the selected motion at time zero, and stops at motion end, episode end,
-or the configured duration. A fixed-offset camera follows the robot's root.
+or the configured duration. A fixed-offset camera follows the policy robot's root. The same view also shows
+a full-body blue reference robot at 40% opacity, aligned with the policy robot
+in the same world coordinates. Reference poses use the motion manager's current
+time and the same spawn/terrain correction as the mimic target. The reference
+contains visual geometry only: it has no articulation, collision, or dynamics
+and cannot affect the policy rollout. Transparency is composited from two views
+of the same simulation instant, so it does not depend on RTX material-opacity
+support. This adds rendering work in the isolated recorder.
 Playback speed follows simulation time independently of output FPS.
 
 Videos appear in the existing W&B run under `videos/best_policy`. Captions and

@@ -1,6 +1,7 @@
 """Packed motion selection and bounded playback without a simulator."""
 
 import json
+from contextlib import ExitStack
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 
@@ -119,12 +120,19 @@ def test_playback_is_deterministic_bounded_and_retains_metadata(
         context.__exit__ = Mock(return_value=False)
         return context
 
-    with patch("protomotions.utils.policy_video.FollowCamera") as camera, patch(
-        "imageio.v2.get_writer", side_effect=get_writer
-    ):
+    with ExitStack() as stack:
+        camera = stack.enter_context(
+            patch("protomotions.utils.policy_video.FollowCamera")
+        )
+        reference = stack.enter_context(
+            patch("protomotions.utils.reference_video.ReferenceRobot")
+        )
+        stack.enter_context(patch("imageio.v2.get_writer", side_effect=get_writer))
         camera.return_value.frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
         record_policy_video(agent, request, checkpoint)
         camera.return_value.close.assert_called_once()
+        reference.return_value.close.assert_called_once()
+        assert reference.return_value.update.call_count == len(steps)
     assert writer.append_data.call_count == expected_frames
     assert env.motion_manager.motion_times.item() == 0
     env.reset.assert_called_once_with(disable_motion_resample=True)

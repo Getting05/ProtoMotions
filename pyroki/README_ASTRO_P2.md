@@ -90,6 +90,9 @@ The complete AMASS pipeline can launch the same eight workers with
 the sorted motion list, writes unique output files, and records its log under
 the output directory's `logs/` folder.
 
+When processing multiple MotionLib files from the same directory, give each one
+a distinct `--output-root` so their intermediate directories do not overlap.
+
 The retargeted NPZ stores `joint_names`; the ProtoMotions converter validates
 and reorders by these names before forward kinematics. This protects P2's
 distinct joint order, where `head_joint` follows the arm joints.

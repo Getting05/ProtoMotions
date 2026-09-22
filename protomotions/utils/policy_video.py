@@ -92,6 +92,20 @@ def configure_video_inference(request, simulator, motion_lib, scene_lib, env):
     env.motion_manager.exclude_motions_file = None
 
 
+def blend_reference(base, overlay, opacity):
+    """Keep the policy visible through reference geometry, independent of materials."""
+    import numpy as np
+
+    return (
+        np.rint(
+            base.astype(np.float32) * (1 - opacity)
+            + overlay.astype(np.float32) * opacity
+        )
+        .clip(0, 255)
+        .astype(np.uint8)
+    )
+
+
 class FollowCamera:
     """A dedicated USD camera / RGB render product; no desktop viewport required."""
 
@@ -144,7 +158,24 @@ class FollowCamera:
         )
         self.transform.Set(view.GetInverse())
 
-    def frame(self):
+    def frame(self, reference=None):
+        from protomotions.utils.reference_video import REFERENCE_OPACITY
+
+        if reference is None:
+            return self._frame()
+        # Composite two identical simulation instants to guarantee fractional
+        # opacity across RTX presets. No physics advances between these passes.
+        reference.set_visible(False)
+        try:
+            self._frame()  # flush visibility to the render product
+            base = self._frame().copy()
+        finally:
+            reference.set_visible(True)
+        self._frame()
+        overlay = self._frame()
+        return blend_reference(base, overlay, REFERENCE_OPACITY)
+
+    def _frame(self):
         import numpy as np
 
         self._follow()
@@ -169,6 +200,8 @@ def record_policy_video(agent, request, checkpoint):
     import imageio.v2 as imageio
     import torch
 
+    from protomotions.utils.reference_video import REFERENCE_OPACITY, ReferenceRobot
+
     env = agent.env
     motion_id = request.get("render_motion_id", request["wandb_video_motion_id"])
     fps = request["wandb_video_fps"]
@@ -187,6 +220,7 @@ def record_policy_video(agent, request, checkpoint):
     env.motion_manager.motion_ids[:] = motion_id
     env.motion_manager.motion_times[:] = 0
     obs, _ = env.reset(disable_motion_resample=True)
+    reference = ReferenceRobot(env)
     camera = FollowCamera(
         env.simulator, request["wandb_video_width"], request["wandb_video_height"]
     )
@@ -215,13 +249,14 @@ def record_policy_video(agent, request, checkpoint):
                 )
                 obs, _, dones, _, _ = env.step(action)
                 elapsed = min(step * dt, duration)
+                reference.update()
                 if frames == 0:
                     # PhysX publishes reset transforms to rendering after its first step.
                     camera.warmup()
                 if frames / fps <= elapsed + 1e-8 and frames < math.ceil(
                     duration * fps
                 ):
-                    frame = camera.frame()
+                    frame = camera.frame(reference)
                     while frames / fps <= elapsed + 1e-8 and frames < math.ceil(
                         duration * fps
                     ):
@@ -258,8 +293,12 @@ def record_policy_video(agent, request, checkpoint):
             "width": request["wandb_video_width"],
             "height": request["wandb_video_height"],
             "robot_positions": camera_samples,
+            "reference_overlay": True,
+            "reference_color": "blue",
+            "reference_opacity": REFERENCE_OPACITY,
         }
         output.with_suffix(".json").write_text(json.dumps(metadata))
     finally:
+        reference.close()
         camera.close()
         temporary.unlink(missing_ok=True)

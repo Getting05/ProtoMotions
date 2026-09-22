@@ -13,9 +13,14 @@ def main():
     p.add_argument('input', type=Path)
     p.add_argument('output_dir', type=Path)
     p.add_argument('--shards', type=int, default=8)
+    p.add_argument(
+        '--prefix',
+        default=None,
+        help="Output prefix; defaults to the input filename stem.",
+    )
     a = p.parse_args()
     torch.set_num_threads(1)
-    src = torch.load(a.input, map_location='cpu', weights_only=False, mmap=True)
+    src = torch.load(a.input, map_location='cpu', weights_only=True, mmap=True)
     n = len(src['motion_num_frames'])
     assert 0 < a.shards <= n
     frame_fields = {'gts','grs','gvs','gavs','dvs','dps','contacts','lrs','goal_states'}
@@ -30,10 +35,14 @@ def main():
         totals[j] += counts[i]
     assert sorted(i for group in groups for i in group) == list(range(n))
     a.output_dir.mkdir(parents=True, exist_ok=True)
-    destinations = [a.output_dir / f'amass_astro_p2_{j:02d}.pt' for j in range(a.shards)]
+    prefix = a.prefix or a.input.stem
+    destinations = [
+        a.output_dir / f'{prefix}_{j}.pt' for j in range(a.shards)
+    ]
     if any(f.exists() for f in destinations):
         raise FileExistsError('Shard outputs already exist; use a new directory')
-    report = dict(source=str(a.input), strategy='Whole motions, longest first into smallest frame total; deterministic',
+    report = dict(source=str(a.input), pattern=str(a.output_dir / f'{prefix}_slurmrank.pt'),
+                  strategy='Whole motions, longest first into smallest frame total; deterministic',
                   source_motions=n, source_frames=sum(counts), shards=[])
     for j, group in enumerate(groups):
         group.sort()
@@ -48,7 +57,9 @@ def main():
         lengths = data['motion_num_frames']
         data['length_starts'] = lengths.cumsum(0) - lengths
         dest = destinations[j]
-        tmp = dest.with_suffix('.partial.pt')
+        # Keep the validation filename free of the reserved ``slurmrank`` token;
+        # MotionLib treats that token as a distributed-training pattern.
+        tmp = a.output_dir / f'.{prefix}_shard{j}.partial.pt'
         torch.save(data, tmp)
         del data
         gc.collect()
