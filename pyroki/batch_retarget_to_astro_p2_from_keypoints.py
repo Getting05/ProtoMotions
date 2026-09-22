@@ -9,6 +9,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import yaml
 
 import jax
 import jax.numpy as jnp
@@ -126,6 +127,7 @@ def load_motion_data(
     subsample_factor,
     target_raw_frames,
     fallback_input_fps=30.0,
+    calibration=None,
 ):
     """Load and process motion data from a keypoints file.
 
@@ -231,6 +233,15 @@ def load_motion_data(
 
     # Scale keypoints to roughly match the robot's size
     if source_type == "smpl":
+        calibration = calibration or {}
+        lower_scale = onp.asarray(
+            calibration.get("lower_scale", [0.9, 0.9, 0.85]), dtype=float
+        )
+        upper_scale = onp.asarray(
+            calibration.get("upper_scale", [0.9, 0.9, 0.8]), dtype=float
+        )
+        shoulder_offset = float(calibration.get("shoulder_offset", 0.0))
+        elbow_offset = float(calibration.get("elbow_offset", 0.0))
         simplified_keypoints_root = simplified_keypoints[:, 0, :]
         simplified_keypoints_local = (
             simplified_keypoints - simplified_keypoints_root[:, None, :]
@@ -238,7 +249,7 @@ def load_motion_data(
         simplified_keypoints_lower_body_local = simplified_keypoints_local[:, 1:9, :]
         simplified_keypoints_lower_body_local = (
             simplified_keypoints_lower_body_local
-            * onp.array([0.9, 0.9, 0.85])[None, None, :]
+            * lower_scale[None, None, :]
         )
 
         simplified_keypoints_upper_body_local = simplified_keypoints_local[
@@ -246,8 +257,14 @@ def load_motion_data(
         ]
         simplified_keypoints_upper_body_local = (
             simplified_keypoints_upper_body_local
-            * onp.array([0.9, 0.9, 0.8])[None, None, :]
+            * upper_scale[None, None, :]
         )
+        # Source keypoint order: L/R shoulder at 9/10 and L/R elbow at 11/12.
+        # Positive Y is left in the retargeting coordinate convention.
+        simplified_keypoints_upper_body_local[:, 0, 1] += shoulder_offset
+        simplified_keypoints_upper_body_local[:, 1, 1] -= shoulder_offset
+        simplified_keypoints_upper_body_local[:, 2, 1] += elbow_offset
+        simplified_keypoints_upper_body_local[:, 3, 1] -= elbow_offset
 
         simplified_keypoints_local = onp.concatenate(
             [
@@ -258,7 +275,7 @@ def load_motion_data(
         )
 
         simplified_keypoints_root = (
-            simplified_keypoints_root * onp.array([0.9, 0.9, 0.85])[None, :]
+            simplified_keypoints_root * lower_scale[None, :]
         )
         simplified_keypoints = (
             simplified_keypoints_root[:, None, :] + simplified_keypoints_local
@@ -494,8 +511,28 @@ def main():
         default=0,
         help="Zero-based shard handled by this process.",
     )
+    parser.add_argument(
+        "--calibration-config",
+        type=str,
+        default=None,
+        help=(
+            "YAML exported by tools/calibration_viewer. Uses its calibration "
+            "section instead of the built-in SMPL scale defaults."
+        ),
+    )
 
     args = parser.parse_args()
+    calibration = None
+    if args.calibration_config:
+        with open(args.calibration_config, "r", encoding="utf-8") as stream:
+            calibration_file = yaml.safe_load(stream) or {}
+        calibration = calibration_file.get("calibration", calibration_file)
+        required = {"upper_scale", "lower_scale"}
+        missing = required - set(calibration)
+        if missing:
+            parser.error(
+                f"--calibration-config is missing keys: {sorted(missing)}"
+            )
 
     # Directory containing motion data files
     keypoints_folder_path = args.keypoints_folder_path
@@ -558,6 +595,7 @@ def main():
                     subsample_factor,
                     TARGET_RAW_FRAMES,
                     args.input_fps,
+                    calibration,
                 )
             )
             save_contact_labels(
@@ -633,6 +671,7 @@ def main():
             subsample_factor,
             TARGET_RAW_FRAMES,
             args.input_fps,
+            calibration,
         )
         server = viser.ViserServer()
         base_frame = server.scene.add_frame("/base", show_axes=False)
@@ -703,6 +742,7 @@ def main():
                 subsample_factor,
                 TARGET_RAW_FRAMES,
                 args.input_fps,
+                calibration,
             )
 
             # Update UI elements that depend on num_timesteps (displayable frames)
@@ -784,6 +824,7 @@ def main():
                 subsample_factor,
                 TARGET_RAW_FRAMES,
                 args.input_fps,
+                calibration,
             )
 
             Ts_world_root, joints = solve_retargeting(

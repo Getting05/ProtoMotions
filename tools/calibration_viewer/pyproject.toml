@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "calibration-viewer"
+version = "0.1.0"
+description = "Interactive morphology calibration between human body models and robots"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "PyYAML>=6.0",
+  "viser>=0.2.23",
+  "yourdfpy>=0.0.58",
+]
+
+[project.optional-dependencies]
+smpl = ["smplx>=0.1.28", "torch>=2.0"]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+calibration-viewer = "calibration_viewer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/calibration_viewer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

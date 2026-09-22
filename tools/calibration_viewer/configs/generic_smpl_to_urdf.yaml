@@ -1,0 +1,23 @@
+format_version: 1
+human:
+  format: smpl_pkl
+  axes: [z, x, y]
+robot:
+  format: urdf
+  base_link: REPLACE_WITH_BASE_LINK
+  keypoint_links:
+    pelvis: REPLACE_WITH_PELVIS_LINK
+    left_hip: REPLACE_WITH_LEFT_HIP_LINK
+    right_hip: REPLACE_WITH_RIGHT_HIP_LINK
+    left_knee: REPLACE_WITH_LEFT_KNEE_LINK
+    right_knee: REPLACE_WITH_RIGHT_KNEE_LINK
+    left_ankle: REPLACE_WITH_LEFT_ANKLE_LINK
+    right_ankle: REPLACE_WITH_RIGHT_ANKLE_LINK
+    left_shoulder: REPLACE_WITH_LEFT_SHOULDER_LINK
+    right_shoulder: REPLACE_WITH_RIGHT_SHOULDER_LINK
+    left_elbow: REPLACE_WITH_LEFT_ELBOW_LINK
+    right_elbow: REPLACE_WITH_RIGHT_ELBOW_LINK
+    left_wrist: REPLACE_WITH_LEFT_WRIST_LINK
+    right_wrist: REPLACE_WITH_RIGHT_WRIST_LINK
+  t_pose_joint_positions: {}
+
