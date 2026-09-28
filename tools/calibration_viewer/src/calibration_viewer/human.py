@@ -24,10 +24,10 @@ SMPL_EDGES = (
     ("left_ankle", "left_foot"),
     ("right_hip", "right_knee"), ("right_knee", "right_ankle"),
     ("right_ankle", "right_foot"),
-    ("neck", "left_collar"), ("left_collar", "left_shoulder"),
+    ("spine3", "left_collar"), ("left_collar", "left_shoulder"),
     ("left_shoulder", "left_elbow"), ("left_elbow", "left_wrist"),
     ("left_wrist", "left_hand"),
-    ("neck", "right_collar"), ("right_collar", "right_shoulder"),
+    ("spine3", "right_collar"), ("right_collar", "right_shoulder"),
     ("right_shoulder", "right_elbow"), ("right_elbow", "right_wrist"),
     ("right_wrist", "right_hand"),
 )
@@ -173,7 +173,7 @@ def _geometry_from_model(
 
 
 def _joints_from_smplx(
-    data: Mapping[str, Any], model_path: Path, frame: int, gender: str
+    data: Mapping[str, Any], model_path: Path, frame: int, gender: str, *, model=None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     try:
         import smplx
@@ -183,7 +183,8 @@ def _joints_from_smplx(
             "This pkl contains SMPL pose parameters but no joints. Install the optional "
             "dependencies with `pip install 'calibration-viewer[smpl]'`."
         ) from exc
-    model = smplx.create(str(model_path), model_type="smpl", gender=gender, batch_size=1)
+    if model is None:
+        model = smplx.create(str(model_path), model_type="smpl", gender=gender, batch_size=1)
     pose_value = data.get("poses", data.get("pose"))
     if pose_value is not None:
         poses = _array(pose_value)

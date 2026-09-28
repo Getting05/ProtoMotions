@@ -1,4 +1,4 @@
-format_version: 1
+format_version: 2
 human:
   format: smpl_pkl
   # Source axes expressed as [robot-forward, robot-left, robot-up].
@@ -30,3 +30,8 @@ robot:
     # The elbow zero pose points the forearms forward; +90° straightens them laterally.
     left_elbow_joint: 1.5708
     right_elbow_joint: 1.5708
+
+calibration:
+  mode: bone
+  bone_scales: {torso: 1.0, upper_arm: 1.0, forearm: 1.0, thigh: 1.0, shank: 1.0}
+  joint_offsets: {shoulder: [0.0, 0.0, 0.0], elbow: [0.0, 0.0, 0.0], hip: [0.0, 0.0, 0.0]}

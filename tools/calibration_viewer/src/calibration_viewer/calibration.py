@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 import numpy as np
 from scipy.optimize import least_squares
+
+
+BONE_SCALES = ("torso", "upper_arm", "forearm", "thigh", "shank")
+SIDE_SCALES = tuple(f"{side}_{bone}" for side in ("left", "right") for bone in BONE_SCALES[1:])
+OFFSET_JOINTS = ("shoulder", "elbow", "hip")
 
 
 @dataclass
@@ -13,18 +18,87 @@ class CalibrationParams:
     lower_scale: np.ndarray
     shoulder_offset: float = 0.0
     elbow_offset: float = 0.0
+    mode: str = "legacy"
+    bone_scales: dict[str, float] = field(default_factory=dict)
+    joint_offsets: dict[str, np.ndarray] = field(default_factory=dict)
+    asymmetric: bool = False
 
     @classmethod
-    def defaults(cls) -> "CalibrationParams":
-        return cls(np.ones(3), np.ones(3), 0.0, 0.0)
+    def defaults(cls, mode: str = "legacy") -> "CalibrationParams":
+        return cls(np.ones(3), np.ones(3), mode=mode)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping | None) -> "CalibrationParams":
+        data = dict(data or {})
+        unknown = set(data) - set(cls.__dataclass_fields__)
+        if unknown:
+            raise ValueError(f"Unknown calibration fields: {sorted(unknown)}")
+        result = cls(**{"upper_scale": np.ones(3), "lower_scale": np.ones(3), **data})
+        result.validate()
+        return result
+
+    def validate(self) -> None:
+        if self.mode not in ("legacy", "bone"):
+            raise ValueError("calibration.mode must be legacy or bone")
+        if not isinstance(self.asymmetric, bool):
+            raise ValueError("asymmetric must be a boolean")
+        for name in ("upper_scale", "lower_scale"):
+            value = np.asarray(getattr(self, name), dtype=float)
+            if value.shape != (3,) or not np.isfinite(value).all() or np.any(value <= 0):
+                raise ValueError(f"{name} must contain three finite positive scales")
+        for name in ("shoulder_offset", "elbow_offset"):
+            if not np.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite")
+        if set(self.bone_scales) - set(BONE_SCALES + SIDE_SCALES):
+            raise ValueError("Unknown bone_scales key")
+        for value in self.bone_scales.values():
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError("Bone scales must be finite and positive")
+        if set(self.joint_offsets) - set(OFFSET_JOINTS):
+            raise ValueError("joint_offsets supports shoulder, elbow and hip")
+        for value in self.joint_offsets.values():
+            value = np.asarray(value, dtype=float)
+            if value.shape != (3,) or not np.isfinite(value).all():
+                raise ValueError("Joint offsets must contain three finite coordinates")
 
     def serializable(self) -> dict:
-        value = asdict(self)
-        value["upper_scale"] = [float(x) for x in self.upper_scale]
-        value["lower_scale"] = [float(x) for x in self.lower_scale]
-        value["shoulder_offset"] = float(self.shoulder_offset)
-        value["elbow_offset"] = float(self.elbow_offset)
-        return value
+        self.validate()
+        return {
+            "mode": self.mode,
+            "upper_scale": [float(x) for x in self.upper_scale],
+            "lower_scale": [float(x) for x in self.lower_scale],
+            "shoulder_offset": float(self.shoulder_offset),
+            "elbow_offset": float(self.elbow_offset),
+            "bone_scales": {k: float(v) for k, v in self.bone_scales.items()},
+            "joint_offsets": {k: [float(x) for x in v] for k, v in self.joint_offsets.items()},
+            "asymmetric": self.asymmetric,
+        }
+
+    def parameter_specs(self) -> list[tuple[str, float, float, float]]:
+        if self.mode == "legacy":
+            return [(f"{part}_{axis}", .3, 2., .01) for part in ("upper", "lower") for axis in "xyz"] + [
+                (f"{joint}_offset_m", -.2, .2, .005) for joint in OFFSET_JOINTS[:2]]
+        scales = ("torso",) + SIDE_SCALES if self.asymmetric else BONE_SCALES
+        return [(key, .3, 2., .01) for key in scales] + [
+            (f"{joint}_{axis}_m", -.2, .2, .005) for joint in OFFSET_JOINTS for axis in "xyz"]
+
+    def vector(self) -> np.ndarray:
+        if self.mode == "legacy":
+            return np.r_[self.upper_scale, self.lower_scale, self.shoulder_offset, self.elbow_offset]
+        scales = ("torso",) + SIDE_SCALES if self.asymmetric else BONE_SCALES
+        return np.array([self.bone_scales.get(k, self.bone_scales.get(k.split("_", 1)[-1], 1.)) for k in scales] +
+                        [x for k in OFFSET_JOINTS for x in self.joint_offsets.get(k, np.zeros(3))])
+
+    def with_vector(self, values: np.ndarray) -> "CalibrationParams":
+        data = self.serializable()
+        if self.mode == "legacy":
+            data.update(upper_scale=values[:3], lower_scale=values[3:6],
+                        shoulder_offset=float(values[6]), elbow_offset=float(values[7]))
+        else:
+            scales = ("torso",) + SIDE_SCALES if self.asymmetric else BONE_SCALES
+            data["bone_scales"].update(dict(zip(scales, values[:len(scales)], strict=True)))
+            data["joint_offsets"] = {k: values[len(scales)+3*i:len(scales)+3*i+3] for i, k in enumerate(OFFSET_JOINTS)}
+        return self.from_mapping(data)
 
 
 UPPER = {
@@ -37,6 +111,9 @@ UPPER = {
 def calibrate_human_points(
     points: Mapping[str, np.ndarray], params: CalibrationParams
 ) -> dict[str, np.ndarray]:
+    params.validate()
+    if params.mode == "bone":
+        return _calibrate_bones(points, params)
     root = np.asarray(points["pelvis"])
     output: dict[str, np.ndarray] = {}
     for name, point in points.items():
@@ -51,6 +128,36 @@ def calibrate_human_points(
     return output
 
 
+def _calibrate_bones(points: Mapping[str, np.ndarray], params: CalibrationParams) -> dict[str, np.ndarray]:
+    from .human import SMPL_EDGES
+    parents = {child: parent for parent, child in SMPL_EDGES}
+    output = {"pelvis": np.asarray(points["pelvis"], dtype=float).copy()}
+
+    def visit(name: str) -> np.ndarray:
+        if name in output:
+            return output[name]
+        if name not in parents or parents[name] not in points:
+            raise ValueError(f"Bone mode requires SMPL parent for {name}: {parents.get(name)}")
+        parent = parents[name]
+        side, _, joint = name.partition("_")
+        group = {"elbow": "upper_arm", "wrist": "forearm", "knee": "thigh", "ankle": "shank"}.get(joint)
+        if name in ("spine1", "spine2", "spine3", "neck"):
+            group = "torso"
+        scale = params.bone_scales.get(group, 1.)
+        if params.asymmetric and group and group != "torso":
+            scale = params.bone_scales.get(f"{side}_{group}", scale)
+        value = visit(parent) + scale * (np.asarray(points[name]) - np.asarray(points[parent]))
+        if joint in OFFSET_JOINTS:
+            offset = np.asarray(params.joint_offsets.get(joint, np.zeros(3)), dtype=float)
+            value = value + offset * np.array([1., 1. if side == "left" else -1., 1.])
+        output[name] = value
+        return value
+
+    for name in points:
+        visit(name)
+    return {name: output[name] for name in points}
+
+
 def fit_calibration(
     human: Mapping[str, np.ndarray],
     robot: Mapping[str, np.ndarray],
@@ -60,47 +167,77 @@ def fit_calibration(
     scale_regularization: float = 0.08,
     offset_regularization: float = 0.02,
 ) -> tuple[CalibrationParams, dict]:
-    """Fit scales and lateral shoulder/elbow offsets with bounded least squares."""
+    """Fit one paired pose; see fit_calibration_frames for synchronized motion."""
+    return fit_calibration_frames([human], [robot], names, initial=initial,
+                                  scale_regularization=scale_regularization,
+                                  offset_regularization=offset_regularization)
+
+
+def fit_calibration_frames(
+    human: Sequence[Mapping[str, np.ndarray]],
+    robot: Sequence[Mapping[str, np.ndarray]],
+    names: Sequence[str],
+    *,
+    initial: CalibrationParams | None = None,
+    scale_regularization: float = 0.08,
+    offset_regularization: float = 0.02,
+) -> tuple[CalibrationParams, dict]:
+    """Fit the active mode; inactive parameters are preserved, never optimized."""
+    if len(human) == 0 or len(human) != len(robot):
+        raise ValueError("Human and robot must have the same nonzero frame count")
     initial = initial or CalibrationParams.defaults()
-    common = [name for name in names if name in human and name in robot]
+    initial.validate()
+    if scale_regularization < 0 or offset_regularization < 0:
+        raise ValueError("Regularization must be nonnegative")
+    common = list(dict.fromkeys(name for name in names if all(name in h and name in r for h, r in zip(human, robot, strict=True))))
     if "pelvis" not in common or len(common) < 4:
         raise ValueError("Calibration requires pelvis and at least three other correspondences")
-    human_root = np.asarray(human["pelvis"])
-    robot_root = np.asarray(robot["pelvis"])
+    for frames in (human, robot):
+        for frame in frames:
+            for point in frame.values():
+                if np.asarray(point).shape != (3,) or not np.isfinite(point).all():
+                    raise ValueError("Each frame must contain finite XYZ points")
 
     def unpack(x: np.ndarray) -> CalibrationParams:
-        return CalibrationParams(x[:3], x[3:6], x[6], x[7])
+        return initial.with_vector(x)
 
     def residual(x: np.ndarray, regularize: bool = True) -> np.ndarray:
-        pred = calibrate_human_points(human, unpack(x))
-        data = [pred[n] - human_root - (np.asarray(robot[n]) - robot_root) for n in common]
+        params = unpack(x)
+        data = []
+        for h, r in zip(human, robot, strict=True):
+            pred = calibrate_human_points(h, params)
+            data.extend(pred[n] - h["pelvis"] - (np.asarray(r[n]) - r["pelvis"]) for n in common)
         result = np.concatenate(data)
         if regularize:
             result = np.concatenate([
                 result,
-                scale_regularization * (x[:6] - 1.0),
-                offset_regularization * x[6:8],
+                np.sqrt(len(human)) * scale_regularization * (x[:scale_count] - 1.0),
+                np.sqrt(len(human)) * offset_regularization * x[scale_count:],
             ])
         return result
 
-    x0 = np.r_[initial.upper_scale, initial.lower_scale,
-               initial.shoulder_offset, initial.elbow_offset]
-    solved = least_squares(
-        residual, x0, bounds=(np.r_[np.full(6, 0.3), -0.20, -0.20],
-                              np.r_[np.full(6, 2.0), 0.20, 0.20])
-    )
-    raw_jac = solved.jac[: len(common) * 3]
+    x0 = initial.vector()
+    specs = initial.parameter_specs()
+    scale_count = 6 if initial.mode == "legacy" else len(x0) - 9
+    lower = np.array([s[1] for s in specs])
+    upper = np.array([s[2] for s in specs])
+    solved = least_squares(residual, np.clip(x0, lower, upper), bounds=(lower, upper))
+    raw_jac = solved.jac[: len(human) * len(common) * 3]
     singular = np.linalg.svd(raw_jac, compute_uv=False)
     rank = int(np.linalg.matrix_rank(raw_jac, tol=1e-7))
     rmse = float(np.sqrt(np.mean(residual(solved.x, regularize=False) ** 2)))
     info = {
         "rmse_m": rmse,
         "rank": rank,
-        "parameter_count": 8,
+        "parameter_count": len(x0),
+        "mode": initial.mode,
+        "success": bool(solved.success),
+        "message": str(solved.message),
         "condition": float(singular[0] / max(singular[-1], 1e-12)),
         "correspondence_count": len(common),
-        "warning": None if rank == 8 else (
-            "The canonical pose does not independently constrain every parameter. "
+        "frame_count": len(human),
+        "warning": None if rank == len(x0) else (
+            "The selected poses do not independently constrain every parameter. "
             "Treat unconstrained values as initial suggestions and verify with more poses."
         ),
     }
