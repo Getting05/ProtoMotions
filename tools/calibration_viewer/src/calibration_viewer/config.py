@@ -9,6 +9,12 @@ import yaml
 def load_config(path: str | Path) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream) or {}
+    if cfg.get("format_version", 1) not in (1, 2):
+        raise ValueError("Unsupported calibration format_version (expected 1 or 2)")
+    from .calibration import CalibrationParams
+    CalibrationParams.from_mapping(cfg.get("calibration"))
+    from .motion import RootTrajectoryParams
+    RootTrajectoryParams.from_mapping(cfg.get("root_trajectory"))
     required = ("base_link", "keypoint_links")
     missing = [key for key in required if key not in cfg.get("robot", {})]
     if missing:

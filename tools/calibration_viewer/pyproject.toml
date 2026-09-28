@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "calibration-viewer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Interactive morphology calibration between human body models and robots"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,10 @@ dependencies = [
 [project.optional-dependencies]
 smpl = ["smplx>=0.1.28", "torch>=2.0"]
 test = ["pytest>=8.0"]
+ik = ["pyroki @ git+https://github.com/chungmin99/pyroki.git@388e43e1fc0d0ee382968d3dd72970fd62a0450c"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.scripts]
 calibration-viewer = "calibration_viewer.cli:main"

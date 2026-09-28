@@ -1,4 +1,4 @@
-format_version: 1
+format_version: 2
 human:
   format: smpl_pkl
   axes: [z, x, y]
@@ -21,3 +21,8 @@ robot:
     right_wrist: REPLACE_WITH_RIGHT_WRIST_LINK
   t_pose_joint_positions: {}
 
+
+calibration:
+  mode: bone
+  bone_scales: {torso: 1.0, upper_arm: 1.0, forearm: 1.0, thigh: 1.0, shank: 1.0}
+  joint_offsets: {shoulder: [0.0, 0.0, 0.0], elbow: [0.0, 0.0, 0.0], hip: [0.0, 0.0, 0.0]}
