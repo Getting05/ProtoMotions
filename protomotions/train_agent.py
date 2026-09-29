@@ -298,6 +298,9 @@ def create_parser():
         "--eval-num-motions", type=int, default=None,
         help="Random motions per rank per evaluation; 0 = all. Also overrides on resume.",
     )
+    from protomotions.agents.evaluators.gpc_prior_cli import add_prior_eval_arguments
+
+    add_prior_eval_arguments(parser)
     return parser
 
 
@@ -635,6 +638,10 @@ def main():
     resolved_configs_path = save_dir / "resolved_configs.pt"
     original_experiment_path = Path(args.experiment_path)
 
+    from protomotions.agents.evaluators.gpc_prior_cli import (
+        explicit_prior_eval_options, apply_prior_eval_options,
+    )
+    prior_eval_options = explicit_prior_eval_options(args)
     eval_num_motions_override = args.eval_num_motions
     if eval_num_motions_override is not None and eval_num_motions_override < 0:
         raise ValueError("--eval-num-motions must be non-negative")
@@ -779,6 +786,8 @@ def main():
         agent_config.evaluator.eval_num_motions = eval_num_motions_override
         args.eval_num_motions = eval_num_motions_override
         log.info("Evaluation motion limit per rank: %s (0 = all)", eval_num_motions_override)
+
+    apply_prior_eval_options(agent_config, prior_eval_options)
 
     # IsaacLab 3 uses xyzw quaternions. Old resolved configs may still carry
     # the IsaacLab 2 wxyz flag, including true resume checkpoints.

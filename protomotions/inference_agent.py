@@ -120,6 +120,9 @@ def create_parser():
         ),
     )
 
+    from protomotions.agents.evaluators.gpc_prior_cli import add_prior_eval_arguments
+
+    add_prior_eval_arguments(parser)
     return parser
 
 
@@ -342,6 +345,11 @@ def main():
             scene_lib_config,
         )
 
+    from protomotions.agents.evaluators.gpc_prior_cli import (
+        explicit_prior_eval_options, apply_prior_eval_options,
+    )
+    apply_prior_eval_options(agent_config, explicit_prior_eval_options(args))
+
     if args.command_source:
         log.info(f"CLI override: command_source = {args.command_source}")
         apply_command_source_overrides(env_config, args.command_source)
@@ -468,6 +476,7 @@ def main():
 
     agent.setup()
     agent.load(args.checkpoint, load_env=False, load_training_state=False)
+    agent.evaluation_checkpoint = str(Path(args.checkpoint).resolve())
     headless = getattr(env.simulator, "headless", True)
     ui = getattr(env.simulator, "user_interface", None)
     if not headless and ui is not None:

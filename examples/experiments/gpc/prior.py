@@ -126,7 +126,7 @@ def agent_config(
         SupervisionLossConfig,
         SupervisionLossType,
     )
-    from protomotions.agents.evaluators.config import EvaluatorConfig
+    from protomotions.agents.evaluators.gpc_prior_config import GPCPriorEvaluatorConfig
     from protomotions.agents.supervised.latent_prior_config import (
         DiscreteAutoregressiveLatentPriorModelConfig,
     )
@@ -195,7 +195,7 @@ def agent_config(
         gradient_clip_val=100.0,
         save_last_checkpoint_every=10,
         save_inference_checkpoint=True,
-        evaluator=EvaluatorConfig(eval_metrics_every=200),
+        evaluator=GPCPriorEvaluatorConfig(eval_metrics_every=200),
         loss=SupervisionLossConfig(
             loss_type=SupervisionLossType.DISCRETE_CROSS_ENTROPY,
             prediction_key=LATENT_LOGITS_KEY,

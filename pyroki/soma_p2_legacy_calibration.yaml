@@ -1,0 +1,120 @@
+{
+  "format_version": 2,
+  "human": {
+    "format": "soma",
+    "layout": "soma23",
+    "units": "m",
+    "axes": [
+      "-y",
+      "x",
+      "z"
+    ],
+    "skeleton": "soma23"
+  },
+  "robot": {
+    "format": "urdf",
+    "base_link": "pelvis",
+    "keypoint_links": {
+      "pelvis": "pelvis",
+      "left_hip": "left_hip_pitch_link",
+      "right_hip": "right_hip_pitch_link",
+      "left_knee": "left_knee_link",
+      "right_knee": "right_knee_link",
+      "left_ankle": "left_ankle_roll_link",
+      "right_ankle": "right_ankle_roll_link",
+      "left_foot": "left_foot_link",
+      "right_foot": "right_foot_link",
+      "left_shoulder": "left_shoulder_pitch_link",
+      "right_shoulder": "right_shoulder_pitch_link",
+      "left_elbow": "left_elbow_link",
+      "right_elbow": "right_elbow_link",
+      "left_wrist": "left_wrist_yaw_link",
+      "right_wrist": "right_wrist_yaw_link",
+      "neck": "head_link"
+    },
+    "t_pose_joint_positions": {
+      "left_hip_pitch_joint": 0.0,
+      "left_hip_roll_joint": 0.0,
+      "left_hip_yaw_joint": 0.0,
+      "left_knee_joint": 0.0,
+      "left_ankle_pitch_joint": 0.0,
+      "left_ankle_roll_joint": 0.0,
+      "right_hip_pitch_joint": 0.0,
+      "right_hip_roll_joint": 0.0,
+      "right_hip_yaw_joint": 0.0,
+      "right_knee_joint": 0.0,
+      "right_ankle_pitch_joint": 0.0,
+      "right_ankle_roll_joint": 0.0,
+      "waist_yaw_joint": 0.0,
+      "waist_pitch_joint": 0.0,
+      "waist_roll_joint": 0.0,
+      "left_shoulder_pitch_joint": 0.0,
+      "left_shoulder_roll_joint": 1.5708,
+      "left_shoulder_yaw_joint": 0.0,
+      "left_elbow_joint": 1.5708,
+      "left_wrist_roll_joint": 0.0,
+      "left_wrist_pitch_joint": 0.0,
+      "left_wrist_yaw_joint": 0.0,
+      "right_shoulder_pitch_joint": 0.0,
+      "right_shoulder_roll_joint": -1.5708,
+      "right_shoulder_yaw_joint": 0.0,
+      "right_elbow_joint": 1.5708,
+      "right_wrist_roll_joint": 0.0,
+      "right_wrist_pitch_joint": 0.0,
+      "right_wrist_yaw_joint": 0.0,
+      "head_joint": 0.0
+    }
+  },
+  "calibration": {
+    "mode": "legacy",
+    "upper_scale": [
+      0.8262075601345926,
+      0.8092629949100781,
+      0.9377121426718812
+    ],
+    "lower_scale": [
+      0.8096854723662273,
+      1.10653564375324,
+      0.66
+    ],
+    "shoulder_offset": -0.015363468867407326,
+    "elbow_offset": 0.012548763947500286,
+    "bone_scales": {
+      "torso": 0.9500702753078469,
+      "upper_arm": 0.9994727267742701,
+      "forearm": 0.7790785441719348,
+      "thigh": 0.6997741356010454,
+      "shank": 0.73
+    },
+    "joint_offsets": {
+      "shoulder": [
+        0.01219819325125712,
+        -0.04679651151997499,
+        -0.018068217034590654
+      ],
+      "elbow": [
+        2.060683992667246e-06,
+        -0.029354111409078124,
+        -2.4870635962694157e-06
+      ],
+      "hip": [
+        -0.022922820364045925,
+        0.011549422528873593,
+        0.0857941975179692
+      ]
+    },
+    "asymmetric": false
+  },
+  "root_trajectory": {
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "offset": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+}

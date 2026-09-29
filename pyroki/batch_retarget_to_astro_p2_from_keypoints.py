@@ -29,7 +29,62 @@ from protomotions.utils.retargeting_fps import fps_from_mapping, subsampled_fps 
 ASTRO_P2_LINK_NAMES = None
 N_retarget = 15
 N_AUX = 3
-RETARGET_VERSION = "p2-pyroki-wrist-v3"
+RETARGET_VERSION = "p2-pyroki-soma-legacy-v4"
+
+
+# User-confirmed SOMA legacy calibration. Bone parameters in exported YAML do
+# not participate in this mode. Extracted keypoints already use robot axes/meters.
+DEFAULT_SOMA_LEGACY_CALIBRATION = {'mode': 'legacy', 'upper_scale': [0.8262075601345926, 0.8092629949100781, 0.9377121426718812], 'lower_scale': [0.8096854723662273, 1.10653564375324, 0.66], 'shoulder_offset': -0.015363468867407326, 'elbow_offset': 0.012548763947500286}
+
+
+def legacy_calibrate_keypoints(positions, orientations, source_type, calibration=None):
+    """SOMA: viewer-compatible pelvis-frame scaling with independent root motion.
+
+    Keep historical SMPL defaults/section-only YAML behavior. A complete viewer
+    YAML explicitly opts SMPL into body-frame calibration and root_trajectory.
+    Inputs are extracted 15 landmarks + 3 auxiliary points, already in meters
+    and robot world axes. human.axes must not be applied a second time here.
+    """
+    if source_type not in ("soma", "smpl"):
+        raise ValueError(f"Invalid source type: {source_type}")
+    full = calibration is not None and "calibration" in calibration
+    supplied = calibration.get("calibration", calibration) if calibration is not None else {}
+    defaults = DEFAULT_SOMA_LEGACY_CALIBRATION if source_type == "soma" else dict(
+        mode="legacy", upper_scale=[.9,.9,.8], lower_scale=[.9,.9,.85], shoulder_offset=0., elbow_offset=0.)
+    settings = {**defaults, **supplied}
+    if settings.get("mode", "legacy") != "legacy":
+        raise ValueError("This keypoints loader requires calibration.mode=legacy; use the bone retarget entry point for bone calibration")
+    def vector(value, name, positive=False):
+        value = onp.asarray(value, dtype=float)
+        if value.shape != (3,) or not onp.isfinite(value).all() or (positive and onp.any(value <= 0)):
+            raise ValueError(f"{name} must be a finite length-3 vector" + (" with positive values" if positive else ""))
+        return value
+    upper = vector(settings["upper_scale"], "upper_scale", True)
+    lower = vector(settings["lower_scale"], "lower_scale", True)
+    shoulder, elbow = float(settings["shoulder_offset"]), float(settings["elbow_offset"])
+    if not onp.isfinite([shoulder, elbow]).all():
+        raise ValueError("shoulder_offset and elbow_offset must be finite")
+    positions = onp.asarray(positions, dtype=float)
+    rotations = onp.asarray(orientations, dtype=float)[:, 0]
+    if positions.ndim != 3 or positions.shape[1:] != (18, 3):
+        raise ValueError("Expected 18 extracted points (15 landmarks + 3 auxiliaries); raw SOMA23/BVH and neck-extended layouts need their own extractor")
+    root = positions[:, 0].copy()
+    local = positions - root[:, None]
+    body_frame = source_type == "soma" or full
+    if body_frame:
+        local = onp.einsum("tki,tij->tkj", local, rotations)
+    local[:, 1:9] *= lower
+    local[:, 9:] *= upper
+    local[:, 9, 1] += shoulder
+    local[:, 10, 1] -= shoulder
+    local[:, 11, 1] += elbow
+    local[:, 12, 1] -= elbow
+    if body_frame:
+        local = onp.einsum("tkj,tij->tki", local, rotations)
+    trajectory = calibration.get("root_trajectory", {}) if calibration is not None else {}
+    root_scale = vector(trajectory.get("scale", [1,1,1] if body_frame else lower), "root_trajectory.scale")
+    root_offset = vector(trajectory.get("offset", [0,0,0]), "root_trajectory.offset")
+    return local + (root * root_scale + root_offset)[:, None]
 
 
 def p2_smpl_hand_aux(wrist_positions, wrist_orientations, side):
@@ -231,97 +286,9 @@ def load_motion_data(
     # Subsample the processed (padded/trimmed) data for the solver's buffer
     simplified_keypoints = processed_positions[::subsample_factor]
 
-    # Scale keypoints to roughly match the robot's size
-    if source_type == "smpl":
-        calibration = calibration or {}
-        lower_scale = onp.asarray(
-            calibration.get("lower_scale", [0.9, 0.9, 0.85]), dtype=float
-        )
-        upper_scale = onp.asarray(
-            calibration.get("upper_scale", [0.9, 0.9, 0.8]), dtype=float
-        )
-        shoulder_offset = float(calibration.get("shoulder_offset", 0.0))
-        elbow_offset = float(calibration.get("elbow_offset", 0.0))
-        simplified_keypoints_root = simplified_keypoints[:, 0, :]
-        simplified_keypoints_local = (
-            simplified_keypoints - simplified_keypoints_root[:, None, :]
-        )
-        simplified_keypoints_lower_body_local = simplified_keypoints_local[:, 1:9, :]
-        simplified_keypoints_lower_body_local = (
-            simplified_keypoints_lower_body_local
-            * lower_scale[None, None, :]
-        )
-
-        simplified_keypoints_upper_body_local = simplified_keypoints_local[
-            :, 9 : N_retarget + N_AUX, :
-        ]
-        simplified_keypoints_upper_body_local = (
-            simplified_keypoints_upper_body_local
-            * upper_scale[None, None, :]
-        )
-        # Source keypoint order: L/R shoulder at 9/10 and L/R elbow at 11/12.
-        # Positive Y is left in the retargeting coordinate convention.
-        simplified_keypoints_upper_body_local[:, 0, 1] += shoulder_offset
-        simplified_keypoints_upper_body_local[:, 1, 1] -= shoulder_offset
-        simplified_keypoints_upper_body_local[:, 2, 1] += elbow_offset
-        simplified_keypoints_upper_body_local[:, 3, 1] -= elbow_offset
-
-        simplified_keypoints_local = onp.concatenate(
-            [
-                simplified_keypoints_lower_body_local,
-                simplified_keypoints_upper_body_local,
-            ],
-            axis=1,
-        )
-
-        simplified_keypoints_root = (
-            simplified_keypoints_root * lower_scale[None, :]
-        )
-        simplified_keypoints = (
-            simplified_keypoints_root[:, None, :] + simplified_keypoints_local
-        )
-        simplified_keypoints = onp.concatenate(
-            [simplified_keypoints_root[:, None, :], simplified_keypoints], axis=1
-        )
-
-    elif source_type == "soma":
-        simplified_keypoints_root = simplified_keypoints[:, 0, :]
-        simplified_keypoints_local = (
-            simplified_keypoints - simplified_keypoints_root[:, None, :]
-        )
-        simplified_keypoints_lower_body_local = simplified_keypoints_local[:, 1:9, :]
-        simplified_keypoints_lower_body_local = (
-            simplified_keypoints_lower_body_local
-            * onp.array([0.8, 0.8, 0.75])[None, None, :]
-        )
-
-        simplified_keypoints_upper_body_local = simplified_keypoints_local[
-            :, 9 : N_retarget + N_AUX, :
-        ]
-        simplified_keypoints_upper_body_local = (
-            simplified_keypoints_upper_body_local
-            * onp.array([0.8, 0.8, 0.7])[None, None, :]
-        )
-
-        simplified_keypoints_local = onp.concatenate(
-            [
-                simplified_keypoints_lower_body_local,
-                simplified_keypoints_upper_body_local,
-            ],
-            axis=1,
-        )
-
-        simplified_keypoints_root = (
-            simplified_keypoints_root * onp.array([0.8, 0.8, 0.75])[None, :]
-        )
-        simplified_keypoints = (
-            simplified_keypoints_root[:, None, :] + simplified_keypoints_local
-        )
-        simplified_keypoints = onp.concatenate(
-            [simplified_keypoints_root[:, None, :], simplified_keypoints], axis=1
-        )
-    else:
-        raise ValueError(f"Invalid source type: {source_type}")
+    # Apply the user's legacy calibration to both supported source branches.
+    simplified_keypoints = legacy_calibrate_keypoints(
+        simplified_keypoints, processed_orientations[::subsample_factor], source_type, calibration)
 
     keypoint_orientations = processed_orientations[::subsample_factor]
 
@@ -516,8 +483,9 @@ def main():
         type=str,
         default=None,
         help=(
-            "YAML exported by tools/calibration_viewer. Uses its calibration "
-            "section instead of the built-in SMPL scale defaults."
+            "Legacy calibration YAML override. SOMA defaults to the embedded latest "
+            "user calibration; complete YAML also honors root_trajectory. "
+            "Input keypoints must already use robot axes and meters."
         ),
     )
 
@@ -526,9 +494,10 @@ def main():
     if args.calibration_config:
         with open(args.calibration_config, "r", encoding="utf-8") as stream:
             calibration_file = yaml.safe_load(stream) or {}
-        calibration = calibration_file.get("calibration", calibration_file)
+        calibration = calibration_file
+        calibration_section = calibration_file.get("calibration", calibration_file)
         required = {"upper_scale", "lower_scale"}
-        missing = required - set(calibration)
+        missing = required - set(calibration_section)
         if missing:
             parser.error(
                 f"--calibration-config is missing keys: {sorted(missing)}"
@@ -916,6 +885,7 @@ def foot_contact_cost(
     astro_p2_joint_retarget_indices: jnp.ndarray,
     foot_indices: jnp.ndarray,  # [4] - left_ankle_idx, right_ankle_idx, left_foot_idx, right_foot_idx
     weight: float,
+    equal_origin_height: bool = True,
 ) -> jax.Array:
     """When either ankle or toe is in contact, penalize velocity of both ankle and toe,
     and also penalize ankle and toe being at different z heights."""
@@ -973,8 +943,8 @@ def foot_contact_cost(
     right_foot_vel_cost = right_contact_weight * right_foot_vel
 
     # Z-height consistency costs (ankle and toe should be at similar z when in contact)
-    left_z_consistency_cost = left_contact_weight * left_ankle_toe_z_diff
-    right_z_consistency_cost = right_contact_weight * right_ankle_toe_z_diff
+    left_z_consistency_cost = left_contact_weight * left_ankle_toe_z_diff * equal_origin_height
+    right_z_consistency_cost = right_contact_weight * right_ankle_toe_z_diff * equal_origin_height
 
     return (
         jnp.concatenate(
@@ -1050,6 +1020,11 @@ def solve_retargeting(
     weights: RetargetingWeights,
     subsample_factor: int = 1,
     input_fps: float = 30.0,
+    pelvis_forward_aux: jdc.Static[bool] = False,
+    initial_joints: jnp.ndarray | None = None,
+    sole_points: jnp.ndarray | None = None,
+    sole_link_indices: jnp.ndarray | None = None,
+    ground_z: float = 0.0,
 ) -> Tuple[jaxlie.SE3, jnp.ndarray]:
     """Solve the simplified retargeting problem."""
 
@@ -1127,7 +1102,7 @@ def solve_retargeting(
         T_world_link = T_world_root @ T_root_link
 
         # Input keypoints are already in the right format
-        target_pos = keypoints[:N_retarget, :]  # (N_retarget, 3)
+        target_pos = keypoints[:n_retarget, :]  # (N_retarget, 3)
         robot_pos = T_world_link.translation()[jnp.array(astro_p2_joint_retarget_indices)]
 
         # NxN grid of relative positions.
@@ -1220,18 +1195,16 @@ def solve_retargeting(
             + link_rot_mat_right_wrist @ jnp.array([0.11, 0.0, 0.0])
         )
 
-        # torso aux link
-        torso_idx = ASTRO_P2_LINK_NAMES.index("torso_link")
-        link_pos_torso = T_world_link.translation()[torso_idx]
-        link_rot_mat_torso = T_world_link.rotation().as_matrix()[torso_idx]
-        # TODO: this is quite heuristic... the source key points are on pelvis which is lower
-        # we use torso here to prevent odd waist rotations
-        # but then we need 0.07m height offset...
-
-        # Match the forward auxiliary source point after the 0.9 horizontal
-        # scaling while allowing P2's waist chain to carry torso orientation.
-        torso_aux_pos = link_pos_torso + link_rot_mat_torso @ jnp.array(
-            [0.18, 0.0, 0.0]
+        # Bone-calibrated targets anchor their forward cue at the pelvis.
+        # Pair it with the robot root frame, not the elevated torso origin.
+        # Preserve the legacy torso cue for existing keypoint callers.
+        if pelvis_forward_aux:
+            T_world_aux = T_world_root
+        else:
+            torso_idx = ASTRO_P2_LINK_NAMES.index("torso_link")
+            T_world_aux = T_world_link[torso_idx]
+        forward_aux_pos = T_world_aux.translation() + T_world_aux.rotation().apply(
+            jnp.array([0.18, 0.0, 0.0])
         )
 
         link_pos_with_aux = jnp.concatenate(
@@ -1241,32 +1214,22 @@ def solve_retargeting(
                 right_hand_aux_pos[None, :],
                 # left_hand_aux_pos_2[None, :],
                 # right_hand_aux_pos_2[None, :],
-                torso_aux_pos[None, :],
+                forward_aux_pos[None, :],
             ],
             axis=0,
         )  # (N_retarget + N_AUX, 3)
 
         keypoint_pos = keypoints  # Already in the right format
 
-        # TODO: downweight hand aux a bit?
-        keypoint_pos = keypoint_pos.at[-2, :].set(keypoint_pos[-2, :] / 4.0)
-        link_pos_with_aux = link_pos_with_aux.at[-2, :].set(
-            link_pos_with_aux[-2, :] / 4.0
-        )
-        keypoint_pos = keypoint_pos.at[-3, :].set(keypoint_pos[-3, :] / 4.0)
-        link_pos_with_aux = link_pos_with_aux.at[-3, :].set(
-            link_pos_with_aux[-3, :] / 4.0
-        )
-
-        # TODO: downweight elbows a bit?
-        keypoint_pos = keypoint_pos.at[-6, :].set(keypoint_pos[-6, :] / 4.0)
-        link_pos_with_aux = link_pos_with_aux.at[-6, :].set(
-            link_pos_with_aux[-6, :] / 4.0
-        )
-        keypoint_pos = keypoint_pos.at[-7, :].set(keypoint_pos[-7, :] / 4.0)
-        link_pos_with_aux = link_pos_with_aux.at[-7, :].set(
-            link_pos_with_aux[-7, :] / 4.0
-        )
+        # Locate softened landmarks by name/count: adding a neck landmark
+        # must not accidentally downweight the neck or a wrist instead of elbows.
+        soft_indices = jnp.array([
+            n_retarget, n_retarget + 1,
+            human_retarget_names.index("left_elbow"),
+            human_retarget_names.index("right_elbow"),
+        ])
+        keypoint_pos = keypoint_pos.at[soft_indices].divide(4.0)
+        link_pos_with_aux = link_pos_with_aux.at[soft_indices].divide(4.0)
 
         return (link_pos_with_aux - keypoint_pos).flatten() * weights[
             "global_alignment"
@@ -1282,6 +1245,20 @@ def solve_retargeting(
         return (
             var_values[var_Ts_world_root].inverse() @ var_values[var_Ts_world_root_prev]
         ).log().flatten() * weights["root_smoothness"]
+
+    @jaxls.Cost.create_factory
+    def sole_ground_cost(values, root_var, joint_var, contact):
+        fk = jaxlie.SE3(robot.forward_kinematics(values[joint_var]))
+        feet = values[root_var] @ jaxlie.SE3(fk.wxyz_xyz[sole_link_indices])
+        points = jnp.einsum("fij,fvj->fvi", feet.rotation().as_matrix(), sole_points) + feet.translation()[:, None, :]
+        height = points[:, :, 2].min(axis=1) - ground_z
+        return jnp.concatenate([jnp.minimum(height - .002, 0.) * 1000., (height - .002) * contact * 40.])
+
+    @jaxls.Cost.create_factory
+    def pelvis_wrist_cost(values, joint_var, local_target):
+        fk = jaxlie.SE3(robot.forward_kinematics(values[joint_var])).translation()
+        wrist_ids = astro_p2_joint_retarget_indices[jnp.array([human_retarget_names.index("left_wrist"), human_retarget_names.index("right_wrist")])]
+        return ((fk[wrist_ids] - local_target) * 20.).flatten()
 
     costs = [
         # Costs that are relatively self-contained to the robot.
@@ -1314,7 +1291,7 @@ def solve_retargeting(
         ),
         pk.costs.rest_cost(
             var_joints,
-            var_joints.default_factory()[None],
+            (jnp.zeros_like(var_joints.default_factory()) if initial_joints is not None else var_joints.default_factory())[None],
             jnp.full(
                 var_joints.default_factory().shape, 0.02
             )  # small rest cost for all joints
@@ -1339,6 +1316,14 @@ def solve_retargeting(
         ),
     ]
 
+    if sole_points is not None:
+        contacts = jnp.concatenate([left_foot_contact, right_foot_contact], axis=-1)
+        costs.append(sole_ground_cost(var_Ts_world_root, var_joints, contacts))
+    if initial_joints is not None:
+        wrist_ids = jnp.array([human_retarget_names.index("left_wrist"), human_retarget_names.index("right_wrist")])
+        local_targets = jnp.einsum("tji,tkj->tki", target_orientations[:, 0], target_keypoints[:, wrist_ids] - target_keypoints[:, :1])
+        costs.append(pelvis_wrist_cost(var_joints, local_targets))
+
     # Add foot contact costs for each timestep (using v2) - start from t=1 since we need previous timestep
     for t in range(1, timesteps):
         costs.append(
@@ -1353,6 +1338,7 @@ def solve_retargeting(
                 astro_p2_joint_retarget_indices,
                 foot_indices,
                 weights["foot_contact"],
+                sole_points is None,
             )
         )
 
@@ -1379,7 +1365,7 @@ def solve_retargeting(
         .solve(
             initial_vals=jaxls.VarValues.make(
                 [
-                    var_joints,  # Use default initialization for joints
+                    var_joints if initial_joints is None else var_joints.with_value(initial_joints),
                     var_Ts_world_root.with_value(
                         root_init_values
                     ),  # Use source root initialization

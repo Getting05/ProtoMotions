@@ -77,8 +77,8 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
             ),
             "pow_rew": pow_rew_factory(weight=-1e-5, min_value=-0.5),
             "contact_match_rew": contact_match_rew_factory(
-                weight=-0.1, zero_during_grace_period=True
-            ),
+                weight=-0.01, zero_during_grace_period=True
+            ),#由于contact label不准确，现在减10倍训练
         },
         action_config=make_pd_action_config(robot_cfg),
         motion_manager=MimicMotionManagerConfig(
