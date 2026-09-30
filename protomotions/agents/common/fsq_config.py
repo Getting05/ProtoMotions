@@ -13,6 +13,10 @@ class FSQAutoEncoderConfig(AutoEncoderConfig):
     """Finite scalar quantization autoencoder configuration."""
 
     _target_: str = "protomotions.agents.common.fsq.FSQAutoEncoder"
+    encoder_output_scale: float = field(
+        default=1.0,
+        metadata={"help": "Positive finite scale applied to encoder output before FSQ tanh."},
+    )
     num_fsq_levels: int = field(
         default=7, metadata={"help": "Number of quantization levels. Must be odd."}
     )

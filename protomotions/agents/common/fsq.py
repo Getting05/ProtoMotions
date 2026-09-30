@@ -3,6 +3,8 @@
 
 """Finite scalar quantization modules."""
 
+import math
+
 import torch
 from tensordict import TensorDict
 from torch import nn
@@ -27,7 +29,14 @@ class FiniteScalarQuantizer(nn.Module):
     bottleneck.
     """
 
-    def __init__(self, num_fsq_levels: int, num_fsq_scalars: int, eps: float = 1e-4):
+    def __init__(
+        self,
+        num_fsq_levels: int,
+        num_fsq_scalars: int,
+        eps: float = 1e-4,
+        *,
+        encoder_output_scale: float = 1.0,
+    ):
         """Create a scalar quantizer with one shared level count per scalar.
 
         Args:
@@ -38,10 +47,16 @@ class FiniteScalarQuantizer(nn.Module):
             eps: Small shrink factor used by the tanh bounding transform to
                 avoid saturating exactly at the outermost level before
                 straight-through rounding.
+            encoder_output_scale: Positive finite multiplier applied before tanh.
+                The default 1.0 preserves existing checkpoint behavior.
         """
         super().__init__()
         if num_fsq_levels % 2 == 0:
             raise ValueError("FSQ requires an odd number of quantization levels")
+
+        if not math.isfinite(encoder_output_scale) or encoder_output_scale <= 0:
+            raise ValueError("encoder_output_scale must be positive and finite")
+        self.encoder_output_scale = float(encoder_output_scale)
 
         levels = torch.full((num_fsq_scalars,), num_fsq_levels, dtype=torch.float32)
         half_l = (levels - 1) * (1 - eps) / 2
@@ -55,7 +70,7 @@ class FiniteScalarQuantizer(nn.Module):
 
     def bound(self, z: torch.Tensor) -> torch.Tensor:
         """Map unbounded latent values into the relaxed FSQ code range."""
-        return z.tanh() * self.half_L.unsqueeze(0).to(z.device)
+        return (z * self.encoder_output_scale).tanh() * self.half_L.unsqueeze(0).to(z.device)
 
     @staticmethod
     def round_ste(z: torch.Tensor) -> torch.Tensor:
@@ -102,7 +117,9 @@ class FSQAutoEncoder(AutoEncoder):
         super().__init__(config)
         self._validate_encoder_output_dim(config.num_fsq_scalars)
         self.quantizer = FiniteScalarQuantizer(
-            config.num_fsq_levels, config.num_fsq_scalars
+            config.num_fsq_levels,
+            config.num_fsq_scalars,
+            encoder_output_scale=getattr(config, "encoder_output_scale", 1.0),
         )
 
     def _validate_encoder_output_dim(self, num_fsq_scalars: int):

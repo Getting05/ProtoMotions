@@ -152,6 +152,8 @@ def agent_config(
     fsq_config = FSQAutoEncoderConfig(
         num_fsq_levels=num_fsq_levels,
         num_fsq_scalars=num_fsq_scalars,
+        # Scale before tanh; try 0.7 in a new training experiment.
+        encoder_output_scale=1.0,
         encoder_out_keys=["latent"],
         decoder_out_keys=["mu"],
         encoder=encoder_config,

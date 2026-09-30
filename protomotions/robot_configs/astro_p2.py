@@ -12,6 +12,7 @@ from protomotions.simulator.isaacgym.config import IsaacGymSimParams, IsaacGymPh
 from protomotions.simulator.isaaclab.config import IsaacLabSimParams, IsaacLabPhysXParams
 from protomotions.simulator.genesis.config import GenesisSimParams
 from protomotions.simulator.newton.config import NewtonSimParams
+from protomotions.robot_configs.astro_p2_pose import P2_DEFAULT_DOF_POS
 
 CONTROL_PARAMETERS = {'left_hip_pitch_joint': {'stiffness': 205.74508953218754,
                           'damping': 20.46584250995764,
@@ -216,13 +217,8 @@ class AstroP2RobotConfig(RobotConfig):
         "waist_roll_link", "head_link", "left_ankle_roll_link",
         "right_ankle_roll_link", "left_wrist_yaw_link", "right_wrist_yaw_link",
     ])
-    default_root_height: float = 0.6462  # Default-pose foot capsules are 1 mm above ground.
-    default_dof_pos: Dict[str, float] = field(default_factory=lambda: {
-        ".*_hip_pitch_joint": -0.312, ".*_knee_joint": 0.669,
-        ".*_ankle_pitch_joint": -0.357, ".*_elbow_joint": 0.2,
-        "left_shoulder_roll_joint": 0.2, "right_shoulder_roll_joint": -0.2,
-        "left_shoulder_pitch_joint": 0.2, "right_shoulder_pitch_joint": 0.2,
-    })
+    default_root_height: float = 0.6462  # All-zero pose: visual soles ~0.95 mm above ground.
+    default_dof_pos: Dict[str, float] = field(default_factory=lambda: P2_DEFAULT_DOF_POS.copy())
     control: ControlConfig = field(default_factory=lambda: ControlConfig(
         pd_action_center="default_pose",
         override_control_info={name: ControlInfo(**values) for name, values in CONTROL_PARAMETERS.items()}
