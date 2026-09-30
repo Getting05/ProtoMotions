@@ -216,7 +216,7 @@ class AstroP2RobotConfig(RobotConfig):
         "waist_roll_link", "head_link", "left_ankle_roll_link",
         "right_ankle_roll_link", "left_wrist_yaw_link", "right_wrist_yaw_link",
     ])
-    default_root_height: float = 0.6252  # Default-pose foot capsules are 2 mm above ground.
+    default_root_height: float = 0.6462  # Default-pose foot capsules are 1 mm above ground.
     default_dof_pos: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": -0.312, ".*_knee_joint": 0.669,
         ".*_ankle_pitch_joint": -0.357, ".*_elbow_joint": 0.2,
