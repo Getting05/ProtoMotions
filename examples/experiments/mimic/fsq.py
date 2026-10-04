@@ -33,6 +33,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
     from protomotions.envs.action import make_pd_action_config
     from protomotions.envs.component_factories import (
         contact_match_rew_factory,
+        foot_height_rew_factory,
         max_coords_obs_factory,
         mimic_target_poses_max_coords_factory,
         mimic_tracking_rewards_factory,
@@ -76,9 +77,11 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
                 rh_coef=-100.0,
             ),
             "pow_rew": pow_rew_factory(weight=-1e-5, min_value=-0.5),
+            # Average the two foot-height scores independently of whole-body tracking.
+            "foot_height_rew": foot_height_rew_factory(weight=0.15, height_std=0.05),
             "contact_match_rew": contact_match_rew_factory(
-                weight=-0.01, zero_during_grace_period=True
-            ),#由于contact label不准确，现在减10倍训练
+                weight=-0.1, zero_during_grace_period=True
+            ),
         },
         action_config=make_pd_action_config(robot_cfg),
         motion_manager=MimicMotionManagerConfig(

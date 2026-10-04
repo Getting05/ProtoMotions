@@ -65,6 +65,27 @@ def compute_gt_rew(
     )
 
 
+def compute_foot_height_rew(
+    current_rigid_body_pos: Tensor,
+    ref_rigid_body_pos: Tensor,
+    foot_body_ids: Tensor,
+    height_std: float = 0.05,
+) -> Tensor:
+    """Track each selected foot's reference height without contact labels.
+
+    Positions must use the same world/ground frame, as in ``compute_gt_rew``.
+    Apply the exponential to each foot separately, then average over feet;
+    errors are not diluted by unrelated bodies or horizontal coordinates.
+    Matching the reference maximizes this term in both stance and swing.
+    ``height_std`` is a positive error scale in metres, validated by the factory.
+    """
+    height_error = (
+        current_rigid_body_pos[:, foot_body_ids, 2]
+        - ref_rigid_body_pos[:, foot_body_ids, 2]
+    ) / height_std
+    return torch.exp(-height_error.square()).mean(dim=-1)
+
+
 def compute_gr_rew(
     current_rigid_body_rot: Tensor,
     ref_rigid_body_rot: Tensor,

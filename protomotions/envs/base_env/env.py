@@ -1709,7 +1709,14 @@ class BaseEnv:
             motion_lib.num_motions() > 0
             and self.config.ref_contact_smooth_window > 0
         ):
-            motion_lib.smooth_contacts(self.config.ref_contact_smooth_window)
+            # Motion lengths vary widely; benchmarking conv1d for each new length
+            # can take minutes per shard. Restore the training setting afterwards.
+            previous_benchmark = torch.backends.cudnn.benchmark
+            try:
+                torch.backends.cudnn.benchmark = False
+                motion_lib.smooth_contacts(self.config.ref_contact_smooth_window)
+            finally:
+                torch.backends.cudnn.benchmark = previous_benchmark
 
         self.motion_lib = motion_lib
         if motion_lib.num_motions() > 0:

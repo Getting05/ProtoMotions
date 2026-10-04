@@ -35,6 +35,7 @@ from protomotions.envs.rewards.base import (
 from protomotions.envs.rewards.tracking import (
     # Standard tracking kernels
     compute_gt_rew,
+    compute_foot_height_rew,
     compute_gr_rew,
     compute_gv_rew,
     compute_gav_rew,
@@ -91,6 +92,7 @@ __all__ = [
     "velocity_squared_sum",
     # Tracking reward kernels
     "compute_gt_rew",
+    "compute_foot_height_rew",
     "compute_gr_rew",
     "compute_gv_rew",
     "compute_gav_rew",

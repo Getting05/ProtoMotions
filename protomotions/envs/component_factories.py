@@ -39,6 +39,7 @@ Example:
     )
 """
 
+import math
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -777,6 +778,31 @@ def gt_rew_factory(weight: float = 0.5, coefficient: float = -100.0) -> MdpCompo
             "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
         },
         static_params={"weight": weight, "coefficient": coefficient},
+    )
+
+
+def foot_height_rew_factory(
+    weight: float = 0.15, height_std: float = 0.05
+) -> MdpComponent:
+    """Independent per-foot height tracking, with no contact-label gating.
+
+    The robot's ``contact_bodies`` must select its foot links. Only their
+    indices are used; simulated and reference contact flags are not inputs.
+    ``weight`` is the total weight after averaging the per-foot exponentials.
+    """
+    from protomotions.envs.rewards import compute_foot_height_rew
+
+    if not math.isfinite(height_std) or height_std <= 0:
+        raise ValueError("height_std must be positive and finite")
+
+    return MdpComponent(
+        compute_func=compute_foot_height_rew,
+        dynamic_vars={
+            "current_rigid_body_pos": EnvContext.current.rigid_body_pos,
+            "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+            "foot_body_ids": EnvContext.contact_body_ids,
+        },
+        static_params={"weight": weight, "height_std": height_std},
     )
 
 
