@@ -264,6 +264,27 @@ Key metrics to monitor:
    and filter runs by any config parameter, compare runs side-by-side, and create custom 
    dashboards. Spend some time exploring the UI to get the most out of experiment tracking.
 
+Logging with SwanLab
+--------------------
+
+SwanLab is an optional alternative that records the same training/evaluation
+metrics and resolved configurations. TensorBoard remains enabled.
+
+.. code-block:: bash
+
+   pip install -e '.[swanlab]'
+   swanlab login
+
+Append ``--logging-backend swanlab --swanlab-project my_project`` to your training
+command. Use ``--logging-backend both`` to record to W&B and SwanLab together,
+or ``--swanlab-mode offline`` to save locally without cloud access. Existing
+``--use-wandb`` commands continue to work unchanged.
+
+The backend selector also applies on resume with the same experiment name.
+SwanLab's run ID is saved separately as ``swanlab_id``. IsaacLab best-policy
+recording is available with ``--swanlab-video``; W&B retains its original MP4,
+while SwanLab receives a GIF preview encoded by the background renderer.
+
 Evaluation
 ----------
 

@@ -57,6 +57,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+swanlab = ["swanlab>=0.10.1,<1"]
 # NOTE: these groups deliberately carry no `python_version` markers. A marker
 # that excludes the running interpreter makes the extra resolve to an EMPTY set,
 # so `pip install "protomotions[mujoco]"` on an unsupported Python reports

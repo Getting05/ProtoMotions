@@ -51,10 +51,12 @@ Convert Docker images to Singularity/Enroot format as required by your cluster.
 import argparse
 import datetime
 import os
+import shlex
 from pathlib import Path
 import subprocess
 
 from protomotions.utils.wandb_video import add_video_arguments, video_cli_options
+from protomotions.utils.experiment_logging import add_logging_arguments, logging_cli_options
 
 
 # =============================================================================
@@ -157,6 +159,7 @@ def create_parser():
     parser.add_argument("--user", type=str, required=True, help="Cluster username")
 
     add_video_arguments(parser)
+    add_logging_arguments(parser)
 
     # Optional arguments
     parser.add_argument("--scenes-file", type=str, default=None, help="Path to scenes file (optional)")
@@ -222,8 +225,16 @@ def build_job_command(args, exp_folder, python_path):
     # Install package
     job_cmd = f"pip uninstall -y protomotions 2>/dev/null; cd {exp_folder}; pip install -e . --no-dependencies; "
 
+    backend = getattr(args, "logging_backend", None)
+    use_wandb = args.use_wandb if backend is None else backend in ("wandb", "both")
+    use_swanlab = getattr(args, "use_swanlab", False) if backend is None else backend in ("swanlab", "both")
+    if use_swanlab:
+        job_cmd += "pip install 'swanlab>=0.10.1,<1'; "
+        # Authenticate on the cluster via `swanlab login` or SWANLAB_API_KEY.
+        # Never copy credentials into the printed command / submission script.
+
     # Add WANDB API key if needed
-    if args.use_wandb:
+    if use_wandb:
         wandb_key = check_wandb_credentials(args.user)
         if wandb_key:
             job_cmd += f"WANDB_API_KEY={wandb_key} "
@@ -250,11 +261,12 @@ def build_job_command(args, exp_folder, python_path):
 
     if args.scenes_file:
         job_cmd += f"--scenes-file={args.scenes_file} "
-    if args.use_wandb:
+    if use_wandb:
         job_cmd += f"--use-wandb --wandb-project={args.wandb_project} "
     if args.checkpoint:
         job_cmd += f"--checkpoint={args.checkpoint} "
     job_cmd += " ".join(video_cli_options(args)) + " "
+    job_cmd += " ".join(shlex.quote(option) for option in logging_cli_options(args)) + " "
     if args.overrides:
         job_cmd += f"--overrides {' '.join(args.overrides)} "
 
@@ -270,7 +282,7 @@ def generate_slurm_script(args, exp_folder, job_cmd, container_image):
         f"srun "
         f"--container-image={container_image} "
         f"--container-mounts={CONTAINER_MOUNTS} "
-        f"/bin/bash -c '{job_cmd}'"
+        f"/bin/bash -c {shlex.quote(job_cmd)}"
     )
 
     script = f"""#!/bin/bash

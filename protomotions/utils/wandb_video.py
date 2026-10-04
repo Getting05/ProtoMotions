@@ -17,6 +17,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 DEFAULTS = {
     "wandb_video": False,
+    "swanlab_video": False,
     "wandb_video_every": 200,
     "wandb_video_duration": 10.0,
     "wandb_video_fps": 30,
@@ -57,8 +58,14 @@ def add_video_arguments(parser):
         default=argparse.SUPPRESS,
         help="Upload best-policy videos (default: disabled)",
     )
+    parser.add_argument(
+        "--swanlab-video",
+        action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help="Upload best-policy GIF videos to SwanLab (default: disabled)",
+    )
     for key, default in DEFAULTS.items():
-        if key == "wandb_video":
+        if key in ("wandb_video", "swanlab_video"):
             continue
         kind = (
             positive_float
@@ -69,6 +76,8 @@ def add_video_arguments(parser):
         )
         parser.add_argument(
             "--" + key.replace("_", "-"),
+            "--" + key.replace("wandb_", "swanlab_").replace("_", "-"),
+            dest=key,
             type=kind,
             default=argparse.SUPPRESS,
             help=f"Best-policy video setting (default: {default})",
@@ -82,11 +91,13 @@ def explicit_video_options(args):
 def resolve_video_options(args, explicit):
     for key, default in DEFAULTS.items():
         setattr(args, key, explicit.get(key, getattr(args, key, default)))
-    if args.wandb_video:
-        if not args.use_wandb:
-            raise ValueError("--wandb-video requires --use-wandb")
+    if args.wandb_video and not args.use_wandb:
+        raise ValueError("--wandb-video requires --use-wandb")
+    if args.swanlab_video and not getattr(args, "use_swanlab", False):
+        raise ValueError("--swanlab-video requires --use-swanlab")
+    if args.wandb_video or args.swanlab_video:
         if args.simulator != "isaaclab":
-            raise ValueError("--wandb-video currently supports only isaaclab")
+            raise ValueError("Best-policy videos currently support only isaaclab")
         for key in (
             "wandb_video_every",
             "wandb_video_fps",
@@ -106,8 +117,8 @@ def resolve_video_options(args, explicit):
 def video_cli_options(args):
     result = []
     for key, value in explicit_video_options(args).items():
-        if key == "wandb_video":
-            result.append("--wandb-video" if value else "--no-wandb-video")
+        if key in ("wandb_video", "swanlab_video"):
+            result.append(("--" if value else "--no-") + key.replace("_", "-"))
         elif value is not None:
             result.append(f"--{key.replace('_', '-')}={value}")
     return result
@@ -140,6 +151,7 @@ def worker_environment(environ, gpu):
         "OMPI_",
         "MV2_",
         "WANDB_",
+        "SWANLAB_",
         "NCCL_",
     )
     env = {
@@ -152,7 +164,7 @@ def worker_environment(environ, gpu):
     if devices is not None and gpu >= len(devices):
         raise ValueError(f"Video GPU {gpu} is outside CUDA_VISIBLE_DEVICES")
     env["CUDA_VISIBLE_DEVICES"] = devices[gpu].strip() if devices else str(gpu)
-    env.update(WANDB_MODE="disabled", PYTHONUNBUFFERED="1", OMP_NUM_THREADS="1")
+    env.update(WANDB_MODE="disabled", SWANLAB_MODE="disabled", PYTHONUNBUFFERED="1", OMP_NUM_THREADS="1")
     return env
 
 
@@ -179,7 +191,9 @@ class BestPolicyVideoRecorder:
         self.last_trigger = None
 
     def tick(self, agent):
-        if agent.fabric.global_rank != 0 or not self.options["wandb_video"]:
+        if agent.fabric.global_rank != 0 or not (
+            self.options["wandb_video"] or self.options["swanlab_video"]
+        ):
             return
         try:
             self._poll(agent.current_epoch)
@@ -350,6 +364,7 @@ class BestPolicyVideoRecorder:
             )
         finally:
             (folder / "best_policy.partial.mp4").unlink(missing_ok=True)
+            (folder / "best_policy.partial.gif").unlink(missing_ok=True)
             if advance and self.job["index"] + 1 < len(self.job["motions"]):
                 self.job["index"] += 1
                 self.job["process"] = None
@@ -367,33 +382,44 @@ class BestPolicyVideoRecorder:
         video = folder / "best_policy.mp4"
         if not video.is_file() or not video.stat().st_size:
             raise RuntimeError("Renderer produced no video")
-        import wandb
-        from lightning.pytorch.loggers import WandbLogger
-
-        logger = next(
-            x for x in self.agent.fabric.loggers if isinstance(x, WandbLogger)
-        )
         caption = (
             f"trigger epoch={metadata['trigger_epoch']}, best epoch={metadata['best_epoch']}, "
             f"score={metadata['best_score']}, motion={metadata['motion_id']}"
         )
-        # Lightning uses trainer/global_step; avoid setting W&B's internal history step.
-        logger.experiment.log(
-            {
-                key: wandb.Video(str(video), format="mp4", caption=caption),
-                "trainer/global_step": current_epoch,
-                **{
-                    (f"videos/{k}" if index == 0 else f"{key}/{k}"): metadata[k]
-                    for k in (
-                        "trigger_epoch",
-                        "best_epoch",
-                        "best_score",
-                        "motion_id",
-                    )
-                },
-            }
-        )
-        log.info("Uploaded best-policy video: %s", video)
+        metrics = {
+            (f"videos/{k}" if index == 0 else f"{key}/{k}"): metadata[k]
+            for k in ("trigger_epoch", "best_epoch", "best_score", "motion_id")
+        }
+        # Isolate upload failures so one backend cannot suppress the other.
+        if self.options["wandb_video"]:
+            try:
+                import wandb
+                from lightning.pytorch.loggers import WandbLogger
+
+                logger = next(
+                    x for x in self.agent.fabric.loggers if isinstance(x, WandbLogger)
+                )
+                # Preserve Lightning's W&B custom step semantics.
+                logger.experiment.log({
+                    key: wandb.Video(str(video), format="mp4", caption=caption),
+                    "trainer/global_step": current_epoch,
+                    **metrics,
+                })
+                log.info("Uploaded W&B best-policy video: %s", video)
+            except Exception:
+                log.warning("Could not upload W&B best-policy video", exc_info=True)
+        if self.options["swanlab_video"]:
+            try:
+                from protomotions.utils.experiment_logging import is_swanlab_logger
+
+                gif = video.with_suffix(".gif")
+                if not gif.is_file() or not gif.stat().st_size:
+                    raise RuntimeError("Renderer produced no SwanLab GIF")
+                logger = next(x for x in self.agent.fabric.loggers if is_swanlab_logger(x))
+                logger.log_video(key, gif, caption, metrics, current_epoch)
+                log.info("Uploaded SwanLab best-policy video: %s", gif)
+            except Exception:
+                log.warning("Could not upload SwanLab best-policy video", exc_info=True)
 
     def _discard_job(self):
         job, self.job = self.job, None

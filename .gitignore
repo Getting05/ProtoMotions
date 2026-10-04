@@ -17,6 +17,7 @@ exps/*
 .DS_Store
 **/.DS_Store
 wandb/*
+swanlog/
 newton_source/*
 data/amass/*.pkl
 .claude/*

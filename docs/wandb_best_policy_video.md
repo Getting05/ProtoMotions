@@ -1,5 +1,8 @@
 # Best-policy videos in W&B (IsaacLab)
 
+SwanLab can record the same policy videos using `--swanlab-video`. See
+[SwanLab logging](swanlab.md) for backend selection, resume, and GIF previews.
+
 Append these options to the normal `protomotions/train_agent.py` command:
 
 ```bash

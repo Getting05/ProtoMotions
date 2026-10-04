@@ -474,7 +474,7 @@ def test_save_configs_tolerates_missing_wandb_id_and_yaml_failure(
     tmp_path,
 ):
     module = _load_train_agent_globals(monkeypatch, tmp_path)
-    module["wandb"].run = object()
+    sys.modules["wandb"].run = object()
     save_dir = tmp_path / "results"
     experiment = tmp_path / "experiment.py"
     experiment.write_text("# experiment\n")
@@ -525,7 +525,7 @@ def test_prepare_inference_configs_for_save_calls_optional_hooks(
     assert config_with_hook.called
 
 
-def test_try_log_hyperparams_to_wandb_logs_only_matching_logger(
+def test_try_log_hyperparams_to_trackers_logs_only_matching_logger(
     monkeypatch,
     tmp_path,
 ):
@@ -534,7 +534,7 @@ def test_try_log_hyperparams_to_wandb_logs_only_matching_logger(
     fabric = SimpleNamespace(loggers=[object(), logger])
     config = _TinyConfig(value=9)
 
-    module["try_log_hyperparams_to_wandb"](
+    module["try_log_hyperparams_to_trackers"](
         fabric,
         config,
         config,
@@ -553,7 +553,7 @@ def test_try_log_hyperparams_to_wandb_logs_only_matching_logger(
     )
 
 
-def test_try_log_hyperparams_to_wandb_tolerates_logger_failures(
+def test_try_log_hyperparams_to_trackers_tolerates_logger_failures(
     monkeypatch,
     tmp_path,
 ):
@@ -563,7 +563,7 @@ def test_try_log_hyperparams_to_wandb_tolerates_logger_failures(
         def log_hyperparams(self, params):
             raise RuntimeError("wandb is offline")
 
-    module["try_log_hyperparams_to_wandb"](
+    module["try_log_hyperparams_to_trackers"](
         SimpleNamespace(loggers=[FailingWandbLogger()]),
         _TinyConfig(value=9),
         _TinyConfig(value=9),
@@ -691,6 +691,7 @@ def test_main_create_config_only_builds_configs_and_exits_before_training(
     main_globals = module["main"].__globals__
     config = _TinyConfig(value=11)
     args = SimpleNamespace(
+        eval_num_motions=None,
         experiment_name="main-config-only",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=True,
@@ -794,6 +795,7 @@ def test_main_config_only_registers_custom_args_and_applies_cli_overrides(
     config = _TinyConfig(value=11)
     motion_lib_config = MotionLibConfig(motion_file="motions.pt")
     args = SimpleNamespace(
+        eval_num_motions=None,
         experiment_name="main-config-overrides",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=True,
@@ -876,14 +878,17 @@ def test_main_config_only_registers_custom_args_and_applies_cli_overrides(
     assert motion_lib_config.motion_file_switch_mode is MotionFileSwitchMode.FIXED
 
 
+@pytest.mark.parametrize("backend", [None, "swanlab", "both"])
 def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
     monkeypatch,
     tmp_path,
+    backend,
 ):
     module = _load_train_agent_globals(monkeypatch, tmp_path)
     main_globals = module["main"].__globals__
     calls = []
     args = SimpleNamespace(
+        eval_num_motions=None,
         experiment_name="fresh",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=False,
@@ -900,6 +905,10 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
         torch_deterministic=True,
         training_max_iterations=None,
     )
+    if backend:
+        args.logging_backend = backend
+    # Mimic the real parser returning a new namespace after custom args register.
+    reparsed_args = SimpleNamespace(**vars(args))
     robot_config = SimpleNamespace(_target_="robot.Target")
     simulator_config = SimpleNamespace(_target_="sim.Target")
     terrain_config = SimpleNamespace(_target_="terrain.Target")
@@ -945,6 +954,12 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
                 barrier=lambda: calls.append(("agent_barrier", None))
             )
             self.loggers = []
+            if backend in ("swanlab", "both"):
+                self.loggers.append(SimpleNamespace(
+                    _protomotions_backend="swanlab",
+                    experiment=SimpleNamespace(id="fresh-swan-id"),
+                    finalize=lambda status: calls.append(("swan_finalize", status)),
+                ))
 
         def launch(self):
             calls.append(("launch", None))
@@ -1025,7 +1040,7 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
     monkeypatch.setitem(
         main_globals,
         "parser",
-        SimpleNamespace(parse_args=lambda: args),
+        SimpleNamespace(parse_args=lambda: reparsed_args),
     )
     monkeypatch.setitem(
         main_globals,
@@ -1045,7 +1060,7 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
     monkeypatch.setitem(main_globals, "save_configs", fake_save_configs)
     monkeypatch.setitem(
         main_globals,
-        "try_log_hyperparams_to_wandb",
+        "try_log_hyperparams_to_trackers",
         lambda *args, **kwargs: calls.append(("try_log_hparams", None)),
     )
     monkeypatch.setitem(
@@ -1101,19 +1116,29 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
     assert build_call[1]["save_dir"] == "weights"
     assert motion_lib_config.validate_calls == 1
     fabric_call = next(call for call in calls if call[0] == "fabric_init")
-    assert len(fabric_call[1]["loggers"]) == 2
-    wandb_logger = next(
-        logger
-        for logger in fabric_call[1]["loggers"]
-        if logger["_target_"].endswith("WandbLogger")
-    )
-    assert wandb_logger["project"] == "custom-project"
+    assert len(fabric_call[1]["loggers"]) == (3 if backend == "both" else 2)
+    if backend != "swanlab":
+        wandb_logger = next(
+            logger for logger in fabric_call[1]["loggers"]
+            if logger["_target_"].endswith("WandbLogger")
+        )
+        assert wandb_logger["project"] == "custom-project"
+    if backend in ("swanlab", "both"):
+        swanlab_logger = next(
+            logger for logger in fabric_call[1]["loggers"]
+            if logger["_target_"].endswith("SwanLabLogger")
+        )
+        assert swanlab_logger["project"] == "physical_animation"
+        assert main_globals["args"].swanlab_id == "fresh-swan-id"
+        assert ("swan_finalize", "success") in calls
     assert len(fabric_call[1]["callbacks"]) == 1
 
 
+@pytest.mark.parametrize("switch_to_swanlab", [False, True])
 def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
     monkeypatch,
     tmp_path,
+    switch_to_swanlab,
 ):
     module = _load_train_agent_globals(monkeypatch, tmp_path)
     main_globals = module["main"].__globals__
@@ -1166,6 +1191,7 @@ def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
     )
 
     args = SimpleNamespace(
+        eval_num_motions=None,
         experiment_name="resume",
         experiment_path=str(tmp_path / "ignored_experiment.py"),
         create_config_only=False,
@@ -1174,6 +1200,9 @@ def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
         ngpu=99,
         nodes=99,
     )
+
+    if switch_to_swanlab:
+        args.logging_backend = "swanlab"
 
     class FakeAppLauncher:
         def __init__(self, flags):
@@ -1204,6 +1233,12 @@ def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
                 barrier=lambda: calls.append(("agent_barrier", None))
             )
             self.loggers = []
+            if switch_to_swanlab:
+                self.loggers.append(SimpleNamespace(
+                    _protomotions_backend="swanlab",
+                    experiment=SimpleNamespace(id="resumed-swan-id"),
+                    finalize=lambda status: calls.append(("swan_finalize", status)),
+                ))
 
         def launch(self):
             calls.append(("launch", None))
@@ -1304,6 +1339,14 @@ def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
     monkeypatch.setitem(sys.modules, "omni.log", omni_log_module)
 
     module["main"]()
+    if switch_to_swanlab:
+        saved = json.loads((resume_dir / "config.yaml").read_text())
+        assert saved["swanlab_id"] == "resumed-swan-id"
+        assert saved["use_swanlab"] and not saved["use_wandb"]
+        assert saved["overrides"] == ["saved.override=1"]
+        assert saved["nodes"] == 2
+        assert ("swan_finalize", "success") in calls
+
 
     assert (
         "agent_load",

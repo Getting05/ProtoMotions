@@ -298,7 +298,31 @@ def record_policy_video(agent, request, checkpoint):
             "reference_opacity": REFERENCE_OPACITY,
         }
         output.with_suffix(".json").write_text(json.dumps(metadata))
+        if request.get("swanlab_video", False):
+            # The SwanLab SDK accepts GIF only. Encode in this isolated child
+            # under the recorder timeout, leaving the original MP4 untouched.
+            try:
+                encode_swanlab_gif(output)
+            except Exception:
+                log.warning("Could not encode SwanLab GIF; MP4 retained", exc_info=True)
     finally:
         reference.close()
         camera.close()
         temporary.unlink(missing_ok=True)
+
+
+def encode_swanlab_gif(video):
+    """Create a bounded-size dashboard preview with the original playback speed."""
+    from moviepy import VideoFileClip
+
+    video = Path(video)
+    output = video.with_suffix(".gif")
+    temporary = output.with_name(output.stem + ".partial.gif")
+    try:
+        with VideoFileClip(str(video)) as clip:
+            preview = clip.resized(width=min(640, clip.w))
+            preview.write_gif(str(temporary), fps=min(15, clip.fps), logger=None)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output

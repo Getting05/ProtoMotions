@@ -78,6 +78,15 @@ Example
 import os
 import sys
 import json
+from protomotions.utils.experiment_logging import (
+    add_logging_arguments,
+    build_swanlab_logger_config,
+    capture_swanlab_id,
+    explicit_logging_options,
+    is_swanlab_logger,
+    persist_logging_options,
+    resolve_logging_options,
+)
 from protomotions.utils.wandb_video import (
     DEFAULTS as VIDEO_DEFAULTS,
     BestPolicyVideoRecorder,
@@ -234,6 +243,7 @@ def create_parser():
         default="physical_animation",
         help="Weights & Biases project name",
     )
+    add_logging_arguments(parser)
     parser.add_argument(
         "--use-slurm",
         action="store_true",
@@ -330,7 +340,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(messag
 from protomotions.utils.hydra_replacement import get_class  # noqa: E402
 import importlib.util  # noqa: E402
 import shutil  # noqa: E402
-import wandb  # noqa: E402
 from lightning.pytorch.loggers import WandbLogger  # noqa: E402
 import torch  # noqa: E402
 from protomotions.utils.torch_utils import seeding  # noqa: E402
@@ -487,6 +496,8 @@ def save_configs(
     # Try to get wandb_id from loggers
     if args.use_wandb:
         try:
+            import wandb
+
             wandb_id = wandb.run.id
             log.info(f"wandb_id found: {wandb_id}")
             checkpoint_config["wandb_id"] = wandb_id
@@ -541,7 +552,7 @@ def save_configs(
     shutil.copy(experiment_source_path, experiment_copy_path)
 
 
-def try_log_hyperparams_to_wandb(
+def try_log_hyperparams_to_trackers(
     fabric,
     robot_config,
     simulator_config,
@@ -552,9 +563,9 @@ def try_log_hyperparams_to_wandb(
     agent_config,
     fabric_config,
 ):
-    """Try to log hyperparameters to wandb (non-critical)."""
+    """Log the same resolved configurations to each enabled experiment tracker."""
     for logger in fabric.loggers:
-        if isinstance(logger, WandbLogger):
+        if isinstance(logger, WandbLogger) or is_swanlab_logger(logger):
             try:
                 hyper_params = {
                     "robot": clean_dict_for_storage(asdict(robot_config)),
@@ -567,12 +578,12 @@ def try_log_hyperparams_to_wandb(
                     "fabric": clean_dict_for_storage(fabric_config.as_loggable_dict()),
                 }
 
-                log.info("Preparing configs for wandb logging...")
+                log.info("Preparing configs for %s...", type(logger).__name__)
                 serializable_params = make_json_serializable(hyper_params)
                 logger.log_hyperparams(serializable_params)
-                log.info("Successfully logged hyperparams to wandb")
+                log.info("Successfully logged hyperparams to %s", type(logger).__name__)
             except Exception as e:
-                log.warning(f"Could not log hyperparams to wandb (non-critical): {e}")
+                log.warning("Could not log hyperparams to %s: %s", type(logger).__name__, e)
 
 
 def build_wandb_logger_config(args, save_dir, wandb_id):
@@ -646,6 +657,7 @@ def main():
     if eval_num_motions_override is not None and eval_num_motions_override < 0:
         raise ValueError("--eval-num-motions must be non-negative")
     video_overrides = explicit_video_options(args)
+    logging_overrides = explicit_logging_options(args)
 
     # --create-config-only: Force fresh mode to just generate configs
     if args.create_config_only:
@@ -658,6 +670,7 @@ def main():
     # 2. Load Configs Based on Mode
     # ===================================================================
 
+    resolve_logging_options(args, logging_overrides, migrate_video=(mode == "resume"))
     resolve_video_options(args, video_overrides)
 
     if mode == "resume":
@@ -721,6 +734,9 @@ def main():
             additional_args_fn(parser)
         
         args = parser.parse_args()
+        # Re-parsing for experiment-specific flags creates a new Namespace.
+        resolve_logging_options(args, logging_overrides)
+        resolve_video_options(args, video_overrides)
 
         # Get required config functions
         terrain_config_fn = getattr(experiment_module, "terrain_config")
@@ -823,6 +839,8 @@ def main():
 
     if args.use_wandb:
         loggers.append(build_wandb_logger_config(args, save_dir, wandb_id))
+    if args.use_swanlab:
+        loggers.append(build_swanlab_logger_config(args, save_dir))
 
     callbacks = []
     if args.use_slurm:
@@ -976,15 +994,15 @@ def main():
     agent.load(args.checkpoint, load_training_state=(mode == "resume"))
 
     # ===================================================================
-    # 6. Save Configs (First Run Only - Warm Start or Fresh)
+    # 6. Initialize Trackers and Save Configs
     # ===================================================================
-    # Only save configs for warm_start or fresh modes (not resume)
-    # Resume already has all configs saved from the original run
+    # Training configs are saved only for warm_start/fresh. Logging settings
+    # and run IDs may be updated independently when resuming.
     is_first_run = mode in ["warm_start", "fresh"]
 
-    if fabric.global_rank == 0 and is_first_run:
-        if args.use_wandb:
-            try_log_hyperparams_to_wandb(
+    if fabric.global_rank == 0 and (is_first_run or args.use_swanlab or logging_overrides):
+        if args.use_wandb or args.use_swanlab:
+            try_log_hyperparams_to_trackers(
                 fabric,
                 robot_config,
                 simulator_config,
@@ -995,7 +1013,18 @@ def main():
                 agent_config,
                 fabric_config,
             )
+        capture_swanlab_id(args, fabric.loggers)
+        if logging_overrides and args.use_wandb:
+            import wandb
 
+            args.wandb_id = wandb.run.id
+
+    if fabric.global_rank == 0 and mode == "resume" and (
+        logging_overrides or args.use_swanlab
+    ):
+        persist_logging_options(save_dir, args)
+
+    if fabric.global_rank == 0 and is_first_run:
         save_configs(
             save_dir,
             args,
@@ -1067,10 +1096,10 @@ def main():
     # 7. Train
     # ===================================================================
     recorder = None
-    if getattr(args, "wandb_video", False) and fabric.global_rank == 0:
+    if (args.wandb_video or args.swanlab_video) and fabric.global_rank == 0:
         recorder = BestPolicyVideoRecorder(args, agent)
         agent.video_recorder = recorder
-    if mode == "resume" and video_overrides and fabric.global_rank == 0:
+    if mode == "resume" and (video_overrides or logging_overrides) and fabric.global_rank == 0:
         # Persist only video options; preserve all original training arguments.
         config_path = save_dir / "config.yaml"
         saved_args = json.loads(config_path.read_text())
@@ -1078,11 +1107,19 @@ def main():
         temporary = config_path.with_suffix(".video.tmp")
         temporary.write_text(json.dumps(saved_args, indent=2))
         temporary.replace(config_path)
+    status = "failed"
     try:
         agent.fit()
+        status = "success"
     finally:
         if recorder is not None:
             recorder.close()
+        for logger in fabric.loggers:
+            if is_swanlab_logger(logger):
+                try:
+                    logger.finalize(status)
+                except Exception:
+                    log.warning("Could not finalize SwanLab logs", exc_info=True)
 
 
 def _handle_create_config_only(

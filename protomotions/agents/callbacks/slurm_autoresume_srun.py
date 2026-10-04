@@ -4,8 +4,6 @@
 import logging
 import time
 
-import wandb
-
 from pytorch_lightning import Callback
 
 from typing import TYPE_CHECKING
@@ -19,6 +17,10 @@ log = logging.getLogger(__name__)
 
 
 def wandb_run_exists():
+    try:
+        import wandb
+    except ImportError:
+        return False
     return isinstance(wandb.run, wandb.sdk.wandb_run.Run)
 
 

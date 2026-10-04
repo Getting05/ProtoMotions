@@ -88,6 +88,57 @@ class VideoTests(unittest.TestCase):
             self.recorder.tick(self.agent)
             start.assert_not_called()
 
+    def test_swanlab_only_schedules_the_same_fixed_and_random_batch(self):
+        self.best()
+        self.recorder.options.update(wandb_video=False, swanlab_video=True)
+        self.agent.env.motion_lib.num_motions = lambda: 3
+        process = Mock()
+        process.poll.return_value = None
+        with patch("protomotions.utils.wandb_video.subprocess.Popen", return_value=process):
+            self.recorder.tick(self.agent)
+        request = json.loads((self.recorder.job["scratch"] / "request.json").read_text())
+        self.assertTrue(request["swanlab_video"])
+        self.assertFalse(request["wandb_video"])
+        self.assertEqual(set(self.recorder.job["motions"]), {0, 1, 2})
+        process.poll.return_value = 1
+        self.recorder._discard_job()
+
+    def test_swanlab_upload_survives_wandb_failure(self):
+        import sys
+        from types import ModuleType
+
+        folder = self.root / "video"
+        folder.mkdir()
+        (folder / "best_policy.mp4").write_bytes(b"mp4")
+        (folder / "best_policy.gif").write_bytes(b"gif")
+        (folder / "best_policy.json").write_text(json.dumps({
+            "trigger_epoch": 200, "best_epoch": 150,
+            "best_score": 0.8, "motion_id": 2,
+        }))
+        class FailingWandbLogger:
+            experiment = Mock()
+        FailingWandbLogger.experiment.log.side_effect = RuntimeError("W&B unavailable")
+        swanlab = NS(_protomotions_backend="swanlab", log_video=Mock())
+        wandb = ModuleType("wandb")
+        wandb.Video = Mock(return_value="mp4-media")
+        loggers = ModuleType("lightning.pytorch.loggers")
+        loggers.WandbLogger = FailingWandbLogger
+        self.agent.fabric.loggers = [FailingWandbLogger(), swanlab]
+        self.recorder.options["swanlab_video"] = True
+        with patch.dict(sys.modules, {"wandb": wandb, "lightning.pytorch.loggers": loggers}):
+            try:
+                for index in (0, 1, 2):
+                    self.recorder.job = {"folder": folder, "index": index}
+                    self.recorder._upload(230)
+            finally:
+                self.recorder.job = None
+        self.assertEqual(swanlab.log_video.call_count, 3)
+        args = swanlab.log_video.call_args.args
+        self.assertEqual(args[0], "videos/best_policy_random_2")
+        self.assertEqual(args[1], folder / "best_policy.gif")
+        self.assertEqual(args[3]["videos/best_policy_random_2/motion_id"], 2)
+        self.assertEqual(args[4], 230)
+
     def test_periodic_even_when_best_unchanged_no_duplicate(self):
         self.best()
         with patch.object(self.recorder, "_start") as start:
@@ -136,6 +187,7 @@ class VideoTests(unittest.TestCase):
                 "PMI_RANK": "7",
                 "OMPI_COMM_WORLD_RANK": "7",
                 "WANDB_RUN_ID": "trainer",
+                "SWANLAB_API_KEY": "must-not-reach-renderer",
                 "CUDA_VISIBLE_DEVICES": "GPU-a,GPU-b",
                 "PATH": "/bin",
             },
@@ -147,6 +199,7 @@ class VideoTests(unittest.TestCase):
                 "CUDA_VISIBLE_DEVICES": "GPU-b",
                 "PATH": "/bin",
                 "WANDB_MODE": "disabled",
+                "SWANLAB_MODE": "disabled",
                 "PYTHONUNBUFFERED": "1",
                 "OMP_NUM_THREADS": "1",
             },

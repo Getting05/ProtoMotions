@@ -4,6 +4,7 @@
 """Tests for the SLURM autoresume callback."""
 
 from types import SimpleNamespace
+import wandb
 
 from protomotions.agents.callbacks import slurm_autoresume_srun as autoresume
 from protomotions.agents.callbacks.slurm_autoresume_srun import (
@@ -77,9 +78,9 @@ def test_wandb_run_exists_uses_wandb_run_type(monkeypatch):
     class _Run:
         pass
 
-    monkeypatch.setattr(autoresume.wandb.sdk.wandb_run, "Run", _Run)
-    monkeypatch.setattr(autoresume.wandb, "run", object())
+    monkeypatch.setattr(wandb.sdk.wandb_run, "Run", _Run)
+    monkeypatch.setattr(wandb, "run", object())
     assert wandb_run_exists() is False
 
-    monkeypatch.setattr(autoresume.wandb, "run", _Run())
+    monkeypatch.setattr(wandb, "run", _Run())
     assert wandb_run_exists() is True
