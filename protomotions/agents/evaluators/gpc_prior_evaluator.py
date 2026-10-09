@@ -5,7 +5,7 @@ means are first computed per initial motion, so BaseAgent's item-weighted
 aggregation remains valid across ranks. Evaluation never changes curriculum.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 from pathlib import Path
 import json
@@ -257,17 +257,29 @@ class GPCPriorEvaluator(BaseEvaluator):
                                                self.config.seed, rank, world, shared).to(self.device)
         n = min(len(ids) for ids in cohorts.values())
         metrics, details = {}, {}
-        with self._evaluation_scope():
-            for split, lib in libraries.items():
-                self._install_library(lib)
-                ids = cohorts[split][:n]
-                log.info("GPC %s: teacher evaluation on %d motions", split, n)
-                teacher = self._teacher(ids)
-                log.info("GPC %s: autonomous rollout for %.2f seconds", split, self.config.max_eval_steps * self.env.dt)
-                rollout, record = self._autonomous(ids)
-                metrics.update({f"eval_{split}/prior/{key}": value for key, value in teacher.items()})
-                metrics.update({f"eval_{split}/rollout/{key}": value for key, value in rollout.items()})
-                details[split] = dict(motion_file=lib.motion_file, **record)
+        has_ema = getattr(self.agent, "ema", None) is not None
+        primary = self.config.weights if has_ema else "raw"
+        sources = [primary]
+        if self.config.compare_raw_ema and has_ema:
+            sources.append("raw" if primary == "ema" else "ema")
+        for source in sources:
+            source_details = {}
+            weight_scope = getattr(self.agent, "evaluation_weights", None)
+            with (weight_scope(source) if weight_scope else nullcontext()), self._evaluation_scope():
+                for split, lib in libraries.items():
+                    self._install_library(lib)
+                    ids = cohorts[split][:n]
+                    log.info("GPC %s/%s: evaluating %d motions", source, split, n)
+                    teacher = self._teacher(ids)
+                    rollout, record = self._autonomous(ids)
+                    values = {f"prior/{key}": value for key, value in teacher.items()}
+                    values.update({f"rollout/{key}": value for key, value in rollout.items()})
+                    metrics.update({f"eval_{source}_{split}/{key}": value for key, value in values.items()})
+                    if source == primary:
+                        metrics.update({f"eval_{split}/{key}": value for key, value in values.items()})
+                    source_details[split] = dict(motion_file=lib.motion_file, **record)
+            details[source] = source_details
+        self.last_evaluation_weights = primary
         score_split = "validation" if "validation" in libraries else "train"
         score = metrics[f"eval_{score_split}/rollout/upright_survival_horizon"]
         self.eval_count += 1
@@ -278,6 +290,7 @@ class GPCPriorEvaluator(BaseEvaluator):
                   "agent_epoch": self.agent.current_epoch, "config": asdict(self.config), "rank": rank, "world_size": world,
                   "num_items_per_split": n, "score_split": score_split, "score": score,
                   "temperature": self.agent.model.temperature, "top_p": self.agent.model.top_p,
-                  "metrics": metrics, "cohorts": details}
+                  "weights": primary, "ema_num_updates": self.agent.ema.num_updates if has_ema else 0,
+                  "metrics": metrics, "cohorts": details[primary], "weight_cohorts": details}
         path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
         return metrics, score, n

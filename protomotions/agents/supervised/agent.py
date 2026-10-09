@@ -8,6 +8,8 @@ an expert policy, and optimizes a configured supervision loss. Algorithms such
 as MaskedMimic are experiment/model configurations of this generic loop.
 """
 
+from contextlib import nullcontext
+
 import torch
 from torch import Tensor
 from tensordict import TensorDict
@@ -206,6 +208,40 @@ class SupervisedAgent(BaseAgent):
             optimizer,
         )
 
+    def _after_create_optimizers(self):
+        super()._after_create_optimizers()
+        self.ema = None
+        decay = getattr(self.config, "ema_decay", None)
+        if decay is None:
+            return
+        from protomotions.agents.supervised.latent_prior_model import (
+            DiscreteAutoregressiveLatentPriorModel,
+        )
+        from protomotions.agents.utils.ema import ModelEMA
+
+        if not isinstance(self.model, DiscreteAutoregressiveLatentPriorModel):
+            raise ValueError("Weight EMA is supported only for the GPC stage-two prior")
+        if any(p.requires_grad for module in (
+            self.model.latent_decoder, self.model.target_latent_encoder
+        ) for p in module.parameters()):
+            raise ValueError("GPC EMA requires a frozen FSQ encoder and decoder")
+        self.ema = ModelEMA(self.model.prior, decay)
+        # Hook the real optimizer, not Fabric.step(): GradScaler does not invoke
+        # the real step when non-finite gradients cause an AMP step to be skipped.
+        optimizer = self.supervised_optimizer
+        optimizer = getattr(optimizer, "optimizer", optimizer)
+        self._ema_step_handle = optimizer.register_step_post_hook(
+            lambda *_: self.ema.update(self.model.prior)
+        )
+
+    def evaluation_weights(self, weights="ema"):
+        if weights not in ("ema", "raw"):
+            raise ValueError(f"Unknown evaluation weights: {weights}")
+        ema = getattr(self, "ema", None)
+        if weights == "ema" and ema is not None:
+            return ema.average_parameters(self.model.prior)
+        return nullcontext()
+
     # -----------------------------
     # Training Loop and Dataset Processing
     # -----------------------------
@@ -389,7 +425,48 @@ class SupervisedAgent(BaseAgent):
     def get_state_dict(self, state_dict):
         state_dict = super().get_state_dict(state_dict)
         state_dict["supervised_optimizer"] = self.supervised_optimizer.state_dict()
+        ema = getattr(self, "ema", None)
+        if ema is not None:
+            if ema._active:
+                raise RuntimeError("Cannot save training state during an EMA weight swap")
+            state_dict["ema"] = ema.state_dict()
         return state_dict
+
+    def _after_load_model_state_dict(self, state_dict):
+        super()._after_load_model_state_dict(state_dict)
+        ema = getattr(self, "ema", None)
+        if ema is not None:
+            from protomotions.agents.utils.ema import ModelEMA
+            self.ema = ModelEMA(self.model.prior, ema.decay)
+            if "ema" in state_dict:
+                self.ema.load_state_dict(state_dict["ema"])
+            else:
+                log.info("Checkpoint has no EMA; initialized EMA from loaded prior weights")
+
+    def get_inference_state_dict(self, state_dict, model_state_dict=None, use_ema=True):
+        ema = getattr(self, "ema", None)
+        if use_ema and ema is not None:
+            # Overlay a separate mapping: never swap live weights or mutate the
+            # training state_dict (whose tensor values alias live parameters).
+            model_state_dict = dict(self.model.state_dict() if model_state_dict is None
+                                    else model_state_dict)
+            for name, value in ema.shadow.items():
+                key = f"prior.{name}"
+                if key in model_state_dict:  # nonpersistent buffers are not serialized
+                    model_state_dict[key] = value
+        result = super().get_inference_state_dict(state_dict, model_state_dict)
+        if ema is not None:
+            result["inference_weights"] = "ema" if use_ema else "raw"
+            result["ema_num_updates"] = ema.num_updates
+        return result
+
+    def save_inference_checkpoint(self, checkpoint_name, inference_state_dict):
+        # A raw-only evaluation must export the weights that earned its score.
+        if checkpoint_name == "score_based.ckpt" and getattr(
+            self.evaluator, "last_evaluation_weights", None
+        ) == "raw":
+            inference_state_dict = self.get_inference_state_dict({}, use_ema=False)
+        super().save_inference_checkpoint(checkpoint_name, inference_state_dict)
 
     def _load_training_state(self, state_dict):
         super()._load_training_state(state_dict)

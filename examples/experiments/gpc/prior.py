@@ -188,6 +188,7 @@ def agent_config(
     return DiscreteAutoregressiveLatentSupervisedAgentConfig(
         model=model_config,
         rollout_actor=RolloutActor.EXPERT,
+        ema_decay=1.0,
         batch_size=args.batch_size,
         training_max_steps=args.training_max_steps,
         num_steps=64,

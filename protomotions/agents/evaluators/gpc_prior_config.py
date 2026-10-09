@@ -9,6 +9,9 @@ from protomotions.agents.evaluators.config import EvaluatorConfig
 @dataclass
 class GPCPriorEvaluatorConfig(EvaluatorConfig):
     _target_: str = "protomotions.agents.evaluators.gpc_prior_evaluator.GPCPriorEvaluator"
+    # Primary weights determine the score/best checkpoint; comparison is optional.
+    weights: str = "ema"
+    compare_raw_ema: bool = False
     max_eval_steps: int = 1000
     num_eval_envs: int = 32
     teacher_steps: int = 64
@@ -22,6 +25,8 @@ class GPCPriorEvaluatorConfig(EvaluatorConfig):
     failure_persistence_steps: int = 5
 
     def validate(self):
+        if self.weights not in ("ema", "raw"):
+            raise ValueError("GPC evaluator weights must be 'ema' or 'raw'")
         for name in ("max_eval_steps", "num_eval_envs", "teacher_steps",
                      "teacher_metric_stride", "failure_persistence_steps"):
             if getattr(self, name) < 1:

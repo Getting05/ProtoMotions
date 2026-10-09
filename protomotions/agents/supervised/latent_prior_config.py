@@ -4,6 +4,7 @@
 """Discrete autoregressive latent-prior configs for generic supervised training."""
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from protomotions.agents.base_agent.config import (
     BaseModelConfig,
@@ -103,6 +104,11 @@ class DiscreteAutoregressiveLatentPriorModelConfig(BaseModelConfig):
 @dataclass
 class DiscreteAutoregressiveLatentSupervisedAgentConfig(SupervisedAgentConfig):
     """Supervised config for training a GPC autoregressive latent prior."""
+
+    ema_decay: Optional[float] = field(
+        default=1.0,
+        metadata={"help": "Prior weight EMA decay; None disables EMA."},
+    )
 
     def prepare_inference_config_for_save(self) -> None:
         """Prepare nested model config before writing inference artifacts."""
