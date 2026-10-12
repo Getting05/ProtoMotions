@@ -24,8 +24,23 @@ from protomotions.agents.peft.adapters import (
     inject_transformer_peft,
     set_peft_layers_train_mode,
 )
+from protomotions.agents.utils.normalization import RunningMeanStd
 
 log = logging.getLogger(__name__)
+
+
+def _copy_reference_module(module: nn.Module) -> nn.Module:
+    """Copy policy state while retaining the shared distributed runtime."""
+    # Agent.setup attaches Fabric to running stats before the reference is
+    # captured. Fabric owns services (including logger thread locks) that must
+    # not be deep-copied. Only these runtime handles are shared; parameters and
+    # normalization buffers still get independent storage.
+    memo = {
+        id(child.fabric): child.fabric
+        for child in module.modules()
+        if isinstance(child, RunningMeanStd) and child.fabric is not None
+    }
+    return copy.deepcopy(module, memo)
 
 
 class DiscretePriorWithPEFT(nn.Module):
@@ -230,11 +245,13 @@ class DiscretePriorWithPEFT(nn.Module):
 
     def ensure_reference_modules(self) -> None:
         if self.reference_prior is None:
-            self.reference_prior = copy.deepcopy(self.base_prior)
+            self.reference_prior = _copy_reference_module(self.base_prior)
         if self.film_input_norm is None:
             self.reference_film_input_norm = None
         elif self.reference_film_input_norm is None:
-            self.reference_film_input_norm = copy.deepcopy(self.film_input_norm)
+            self.reference_film_input_norm = _copy_reference_module(
+                self.film_input_norm
+            )
         self._freeze_reference_modules()
 
     def _freeze_reference_modules(self) -> None:
