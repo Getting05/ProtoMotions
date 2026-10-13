@@ -32,13 +32,8 @@ class DiscretePriorPEFTSFTAgent(
         if getattr(config.model, "critic", None) is not None:
             raise ValueError("DiscretePriorPEFTSFTAgent does not use a critic.")
         super().__init__(fabric, env, config, root_dir=root_dir)
-        if getattr(config, "physics_guard_enabled", True):
-            if env.simulator.__class__.__module__ == "protomotions.simulator.isaaclab.simulator":
-                from protomotions.utils.physics_guard import PhysicsGuard
-                env.simulator._physics_guard = PhysicsGuard(
-                    env.simulator, env=env, folder=self.root_dir / "physics_guard",
-                    joint_speed_limit=getattr(config, "physics_guard_joint_speed_limit", 1000.),
-                    max_consecutive=getattr(config, "physics_guard_max_consecutive", 3))
+        from protomotions.utils.guarded_rlft import install_guard
+        install_guard(self)
 
     @property
     def has_critic(self):

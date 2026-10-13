@@ -210,7 +210,11 @@ class AMPTrainingComponent:
         disc_data_dict = {}
         for key in discriminator_keys:
             disc_data_dict[key] = dataset[key]
-        self.update_disc_replay_buffer(disc_data_dict)
+        if "physics_valid" in dataset:
+            valid = dataset["physics_valid"].bool()
+            disc_data_dict = {k: v[valid] for k, v in disc_data_dict.items()}
+        if next(iter(disc_data_dict.values())).shape[0] > 0:
+            self.update_disc_replay_buffer(disc_data_dict)
         return dataset
 
     def get_expert_disc_obs(self, num_samples: int):
@@ -514,11 +518,11 @@ class AMPTrainingComponent:
             "losses/disc_critic_loss": disc_critic_loss.detach(),
             "disc_critic/explained_variance": disc_explained_var,
             "disc_critic/value_mean": values.detach().mean(),
-            "disc_critic/value_std": values.detach().std(),
+            "disc_critic/value_std": values.detach().std(unbiased=False),
             "disc_critic/return_mean": disc_returns.mean(),
-            "disc_critic/return_std": disc_returns.std(),
+            "disc_critic/return_std": disc_returns.std(unbiased=False),
             "disc_critic/error_mean": disc_errors.mean(),
-            "disc_critic/error_std": disc_errors.std(),
+            "disc_critic/error_std": disc_errors.std(unbiased=False),
         }
 
     def discriminator_step(
@@ -552,7 +556,7 @@ class AMPTrainingComponent:
 
         expert_obs_td = TensorDict(
             expert_obs,
-            batch_size=self.config.amp_parameters.discriminator_batch_size,
+            batch_size=next(iter(expert_obs.values())).shape[0],
         )
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
             expert_obs_td = self.discriminator(expert_obs_td)
@@ -563,14 +567,14 @@ class AMPTrainingComponent:
 
         agent_obs_td = TensorDict(
             agent_obs,
-            batch_size=self.config.amp_parameters.discriminator_batch_size,
+            batch_size=next(iter(agent_obs.values())).shape[0],
         )
         agent_obs_td = self.discriminator(agent_obs_td)
         agent_logits = agent_obs_td[self.discriminator.module.config.out_keys[0]]
 
         replay_obs_td = TensorDict(
             replay_obs,
-            batch_size=self.config.amp_parameters.discriminator_batch_size,
+            batch_size=next(iter(replay_obs.values())).shape[0],
         )
         replay_obs_td = self.discriminator(replay_obs_td)
         replay_logits = replay_obs_td[self.discriminator.module.config.out_keys[0]]
@@ -578,7 +582,7 @@ class AMPTrainingComponent:
         if negative_expert_obs is not None:
             negative_expert_obs_td = TensorDict(
                 negative_expert_obs,
-                batch_size=self.config.amp_parameters.discriminator_batch_size,
+                batch_size=next(iter(negative_expert_obs.values())).shape[0],
             )
             negative_expert_obs_td = self.discriminator(negative_expert_obs_td)
             negative_expert_logits = negative_expert_obs_td[

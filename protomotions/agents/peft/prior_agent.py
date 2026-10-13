@@ -22,7 +22,11 @@ from protomotions.agents.peft.prior_setup import DiscretePriorPEFTSetupMixin
 log = logging.getLogger(__name__)
 
 
-class DiscretePriorPEFTRLFTAgent(DiscretePriorPEFTSetupMixin, FineTuningAgent):
+from protomotions.utils.guarded_rlft import PhysicsGuardRLFTMixin, moments
+from protomotions.utils.valid_samples import current_valid_mask
+
+
+class DiscretePriorPEFTRLFTAgent(PhysicsGuardRLFTMixin, DiscretePriorPEFTSetupMixin, FineTuningAgent):
     """PPO/RLFT for a PEFT-adapted discrete GPC prior.
 
     This class is intentionally RL-only: it owns PPO ratio loss, critic loss,
@@ -101,7 +105,11 @@ class DiscretePriorPEFTRLFTAgent(DiscretePriorPEFTSetupMixin, FineTuningAgent):
         prior_tokens = batch_dict["prior_tokens"].detach()
         old_neglogp = batch_dict["neglogp"].detach()
         advantages = batch_dict["advantages"].detach()
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if getattr(self, '_guard_optimizing', False):
+            mean, std, _ = moments(self, advantages, current_valid_mask())
+            advantages = (advantages - mean) / (std + 1e-8)
+        else:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # PPO is applied in token space: rollout sampled GPC prior tokens from
         # the adapter, then optimization replays those exact tokens under
@@ -119,6 +127,14 @@ class DiscretePriorPEFTRLFTAgent(DiscretePriorPEFTSetupMixin, FineTuningAgent):
         ):
             prior_logits = prior_with_peft.forward_prior(prior_dict)
             loss_top_p = prior_with_peft.prior_top_p
+
+        if getattr(self, '_guard_optimizing', False) and not current_valid_mask().any():
+            # A dummy DDP row has no recorded action. Select a token in the
+            # current support so its zero-weight loss/metrics cannot contain inf.
+            support_logits = prior_logits if prior_logits is not None else logits
+            prior_tokens = support_logits.detach().argmax(dim=-1)
+            old_neglogp = torch.zeros_like(prior_tokens, dtype=logits.dtype)
+            advantages = torch.zeros_like(advantages)
 
         ppo_loss, ppo_log_dict = compute_discrete_latent_ppo_loss(
             logits=logits,
@@ -158,7 +174,7 @@ class DiscretePriorPEFTRLFTAgent(DiscretePriorPEFTSetupMixin, FineTuningAgent):
             "actor/kl_prior_loss": kl_prior_loss.detach(),
             "actor/kl_coeff": kl_coeff,
             "actor/adv_mean": advantages.mean().detach(),
-            "actor/adv_std": advantages.std().detach(),
+            "actor/adv_std": advantages.std(unbiased=False).detach(),
             "losses/actor_loss": loss.detach(),
             "stats/reward_mean": batch_dict["rewards"].mean().detach(),
         }
@@ -196,7 +212,10 @@ class DiscretePriorPEFTRLFTAgent(DiscretePriorPEFTSetupMixin, FineTuningAgent):
         skip_actor = bool(getattr(self, "_kl_early_stop_triggered", False))
         target_kl = getattr(self.config, "target_kl", None)
         if not skip_actor and target_kl is not None and "actor/kl" in actor_log_dict:
-            actor_kl = actor_log_dict["actor/kl"].detach().item()
+            actor_kl_tensor = actor_log_dict["actor/kl"].detach()
+            if getattr(self, '_guard_optimizing', False):
+                actor_kl_tensor = actor_kl_tensor * self._guard_loss_scale
+            actor_kl = self.fabric.all_reduce(actor_kl_tensor, reduce_op="mean").item()
             if actor_kl > target_kl * 1.5:
                 self._kl_early_stop_triggered = True
                 skip_actor = True

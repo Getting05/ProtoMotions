@@ -12,7 +12,10 @@ from protomotions.agents.amp.component import AMPAgentMixin
 from protomotions.agents.peft.prior_agent import DiscretePriorPEFTRLFTAgent
 
 
-class DiscretePriorPEFTRLFTAMPAgent(AMPAgentMixin, DiscretePriorPEFTRLFTAgent):
+from protomotions.utils.guarded_rlft import PhysicsGuardAMPOuterMixin
+
+
+class DiscretePriorPEFTRLFTAMPAgent(PhysicsGuardAMPOuterMixin, AMPAgentMixin, DiscretePriorPEFTRLFTAgent):
     """Discrete-prior PEFT RLFT with AMP-style reward shaping."""
 
     def __init__(self, fabric: Fabric, env, config, root_dir: Optional[Path] = None):

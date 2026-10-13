@@ -298,6 +298,8 @@ def create_parser():
         "--eval-num-motions", type=int, default=None,
         help="Random motions per rank per evaluation; 0 = all. Also overrides on resume.",
     )
+    parser.add_argument("--physics-guard", action=argparse.BooleanOptionalAction, default=None,
+                        help="Stage-three IsaacLab fault isolation; enabled by default for SFT/RLFT/AMP. Also applies on resume.")
     from protomotions.agents.evaluators.gpc_prior_cli import add_prior_eval_arguments
 
     add_prior_eval_arguments(parser)
@@ -642,6 +644,7 @@ def main():
         explicit_prior_eval_options, apply_prior_eval_options,
     )
     prior_eval_options = explicit_prior_eval_options(args)
+    physics_guard_override = args.physics_guard
     eval_num_motions_override = args.eval_num_motions
     if eval_num_motions_override is not None and eval_num_motions_override < 0:
         raise ValueError("--eval-num-motions must be non-negative")
@@ -787,6 +790,11 @@ def main():
         args.eval_num_motions = eval_num_motions_override
         log.info("Evaluation motion limit per rank: %s (0 = all)", eval_num_motions_override)
 
+    if physics_guard_override is not None:
+        if not hasattr(agent_config, "physics_guard_enabled"):
+            raise ValueError("--physics-guard only applies to stage-three PEFT agents")
+        agent_config.physics_guard_enabled = physics_guard_override
+        args.physics_guard = physics_guard_override
     apply_prior_eval_options(agent_config, prior_eval_options)
 
     # IsaacLab 3 uses xyzw quaternions. Old resolved configs may still carry

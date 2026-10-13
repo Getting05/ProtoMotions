@@ -262,6 +262,9 @@ class DiscretePriorPEFTRLFTAgentConfig(FineTuningAgentConfig):
     """RLFT config for PPO fine-tuning of a discrete-prior PEFT adapter."""
 
     _target_: str = "protomotions.agents.peft.prior_agent.DiscretePriorPEFTRLFTAgent"
+    physics_guard_enabled: bool = True
+    physics_guard_joint_speed_limit: float = 1000.0
+    physics_guard_max_consecutive: int = 3
 
     pretrained_modules: Dict[str, PretrainedModelConfig] = field(
         default_factory=dict,
