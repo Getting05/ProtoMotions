@@ -91,10 +91,13 @@ class _FakePEFTInput(nn.Module):
         self.scale = nn.Parameter(torch.ones(()))
 
     def forward(self, tensordict):
-        output = torch.cat(
-            [tensordict[key] for key in self.in_keys],
-            dim=-1,
-        ) * self.scale
+        output = (
+            torch.cat(
+                [tensordict[key] for key in self.in_keys],
+                dim=-1,
+            )
+            * self.scale
+        )
         if "task_cond" in self.out_keys:
             tensordict["task_cond"] = output
         for key in self.out_keys:
@@ -276,7 +279,9 @@ _DEFAULT_CONDITIONING_KEYS = (
 
 def _actor(monkeypatch, mimic_target_poses_dim=2):
     _FakeDiscretePriorWithPEFT.instances.clear()
-    monkeypatch.setattr(actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT)
+    monkeypatch.setattr(
+        actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT
+    )
     actor_peft_model = _actor_peft_model_config()
     return DiscretePriorPEFTActor(
         config=SimpleNamespace(
@@ -291,7 +296,9 @@ def _actor(monkeypatch, mimic_target_poses_dim=2):
 
 def _adaptive_actor(monkeypatch, task_in_keys=("task_obs",), mimic_target_poses_dim=2):
     _FakeDiscretePriorWithPEFT.instances.clear()
-    monkeypatch.setattr(actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT)
+    monkeypatch.setattr(
+        actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT
+    )
     return DiscretePriorPEFTActor(
         config=DiscretePriorPEFTActorConfig(
             in_keys=list(task_in_keys),
@@ -537,6 +544,96 @@ def test_prior_peft_actor_passes_raw_max_coords_obs_to_frozen_prior(monkeypatch)
     assert torch.equal(rollout_prior_dict["max_coords_obs"], raw_obs)
 
 
+@pytest.mark.parametrize("peft_type", ["lora", "dora"])
+@pytest.mark.parametrize("token_dtype", [torch.int32, torch.int64])
+def test_prior_peft_actor_integer_tokens_match_dense_logits_and_gradients(
+    monkeypatch, peft_type, token_dtype
+):
+    torch.manual_seed(42)
+    actor = DiscretePriorPEFTActor(
+        config=SimpleNamespace(
+            peft=_peft_config(
+                model=_actor_peft_model_config(in_keys=["task_obs"]),
+                peft_type=peft_type,
+            ),
+            in_keys=["task_obs"],
+            out_keys=["action", "mean_action", "neglogp", "prior_tokens"],
+        ),
+        pretrained_prior_model=_PriorModel(),
+        mimic_target_poses_dim=2,
+    )
+    td = _td()
+    tokens = torch.tensor([[0, 1], [0, 8]], dtype=token_dtype)
+    dense_tokens = torch.nn.functional.one_hot(tokens.long(), 9).float()
+
+    def reject_one_hot(*args, **kwargs):
+        raise AssertionError("Stage 3 default prior must not construct one-hot tokens")
+
+    # Even lazy prior initialization should materialize its layers with IDs.
+    with monkeypatch.context() as guard:
+        guard.setattr(torch.nn.functional, "one_hot", reject_one_hot)
+        guard.setattr(
+            actor.prior_with_peft.base_prior, "_one_hot_tokens", reject_one_hot
+        )
+        actor.init_peft(warmup_obs=td)
+
+    # Nonzero adapters exercise conditioning gradients as well as token logits.
+    with torch.no_grad():
+        for parameter in actor.parameters():
+            if parameter.requires_grad:
+                parameter.add_(0.05 * torch.randn_like(parameter))
+    actor.prior_with_peft.capture_reference()
+    actor.train()
+    state_shapes = {key: value.shape for key, value in actor.state_dict().items()}
+
+    dense_input = actor.build_prior_input(td)
+    assert "tokens" not in dense_input
+    dense_input["tokens"] = dense_tokens
+    dense_logits = actor(dense_input)
+    dense_reference = actor.prior_with_peft.forward_prior(dense_input)
+    dense_logits.square().mean().backward()
+    dense_grads = {
+        name: parameter.grad.clone()
+        for name, parameter in actor.named_parameters()
+        if parameter.grad is not None
+    }
+    assert dense_grads
+    actor.zero_grad(set_to_none=True)
+
+    with monkeypatch.context() as guard:
+        guard.setattr(torch.nn.functional, "one_hot", reject_one_hot)
+        guard.setattr(actor, "one_hot_prior_tokens", reject_one_hot)
+        for prior in (
+            actor.prior_with_peft.base_prior,
+            actor.prior_with_peft.reference_prior,
+        ):
+            guard.setattr(prior, "_one_hot_tokens", reject_one_hot)
+        prior_input = actor.build_prior_input(td, tokens=tokens)
+        assert prior_input["tokens"] is tokens
+        logits = actor(prior_input)
+        reference = actor.prior_with_peft.forward_prior(prior_input)
+        logits.square().mean().backward()
+
+    torch.testing.assert_close(logits, dense_logits, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(reference, dense_reference, rtol=1e-5, atol=1e-6)
+    grads = {
+        name: parameter.grad
+        for name, parameter in actor.named_parameters()
+        if parameter.grad is not None
+    }
+    assert grads.keys() == dense_grads.keys()
+    for name, grad in grads.items():
+        torch.testing.assert_close(grad, dense_grads[name], rtol=1e-5, atol=1e-6)
+    assert {
+        key: value.shape for key, value in actor.state_dict().items()
+    } == state_shapes
+    assert all(
+        parameter.grad is None
+        for parameter in actor.prior_with_peft.base_prior.parameters()
+        if not parameter.requires_grad
+    )
+
+
 def test_prior_peft_actor_encode_decode_and_target_prediction(monkeypatch):
     actor = _actor(monkeypatch)
     td = _td()
@@ -548,7 +645,9 @@ def test_prior_peft_actor_encode_decode_and_target_prediction(monkeypatch):
     )
     assert torch.equal(
         actor.predict_target_prior_tokens(td),
-        actor.fsq_indices_to_prior_tokens(actor.fsq_codes_to_fsq_indices(actor._encode(td))),
+        actor.fsq_indices_to_prior_tokens(
+            actor.fsq_codes_to_fsq_indices(actor._encode(td))
+        ),
     )
 
 
@@ -600,7 +699,9 @@ def test_prior_peft_actor_default_conditioning_uses_task_and_prior_context_input
 
 def test_prior_peft_actor_uses_only_configured_actor_peft_model_inputs(monkeypatch):
     _FakeDiscretePriorWithPEFT.instances.clear()
-    monkeypatch.setattr(actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT)
+    monkeypatch.setattr(
+        actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT
+    )
     actor_peft_model = _actor_peft_model_config(
         in_keys=["max_coords_obs", *_DEFAULT_CONDITIONING_KEYS],
     )
@@ -626,7 +727,9 @@ def test_prior_peft_actor_uses_only_configured_actor_peft_model_inputs(monkeypat
 
 def test_prior_peft_actor_requires_actor_peft_model_task_cond(monkeypatch):
     _FakeDiscretePriorWithPEFT.instances.clear()
-    monkeypatch.setattr(actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT)
+    monkeypatch.setattr(
+        actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT
+    )
 
     with pytest.raises(AssertionError, match="task_cond"):
         DiscretePriorPEFTActor(
@@ -647,7 +750,9 @@ def test_prior_peft_actor_requires_actor_peft_model_task_cond(monkeypatch):
 
 def test_prior_peft_actor_adds_frozen_prior_inputs_to_runtime_inputs(monkeypatch):
     _FakeDiscretePriorWithPEFT.instances.clear()
-    monkeypatch.setattr(actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT)
+    monkeypatch.setattr(
+        actor_module, "DiscretePriorWithPEFT", _FakeDiscretePriorWithPEFT
+    )
 
     actor = DiscretePriorPEFTActor(
         config=SimpleNamespace(

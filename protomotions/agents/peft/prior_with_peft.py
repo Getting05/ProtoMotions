@@ -182,15 +182,12 @@ class DiscretePriorWithPEFT(nn.Module):
         else:
             # Token values are irrelevant here; we only need a valid token tensor
             # shape so teacher_force can materialize the lazy context encoder dims.
-            token_one_hot = torch.zeros(
+            td_data[bp.token_key] = torch.zeros(
                 batch_size,
                 bp.num_tokens,
-                bp.vocab_size,
                 device=device,
-                dtype=torch.float32,
+                dtype=torch.long,
             )
-            token_one_hot[:, :, 0] = 1.0
-            td_data[bp.token_key] = token_one_hot
         bp.teacher_force(TensorDict(td_data, batch_size=batch_size, device=device))
 
     def _freeze_base(self):

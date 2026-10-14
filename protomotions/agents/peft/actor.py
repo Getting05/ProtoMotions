@@ -358,13 +358,12 @@ class DiscretePriorPEFTActor(nn.Module):
         # prior context keys come from the loaded prior checkpoint, and both are
         # merged here into the exact dictionary consumed by DiscretePriorWithPEFT.
         input_td = self._run_actor_peft_model(tensordict)
-        token_one_hot = None
-        if tokens is not None:
-            token_one_hot = self.one_hot_prior_tokens(tokens)
         prior_dict = {key: input_td[key] for key in self.frozen_prior_input_keys}
         prior_dict[self.condition_key] = input_td[self.condition_key]
-        if token_one_hot is not None:
-            prior_dict["tokens"] = token_one_hot
+        if tokens is not None:
+            # Keep IDs compact so the prior can use its embedding lookup. Custom
+            # token encoders retain their one-hot fallback inside encode_tokens.
+            prior_dict["tokens"] = tokens
         return prior_dict
 
     # ---- forward / rollout ----
