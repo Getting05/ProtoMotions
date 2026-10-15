@@ -13,6 +13,11 @@ def prepare_video_motion(request, directory):
 
     Scene-linked libraries keep their indices because scene assignment uses them.
     """
+    if request.get("kind") == "steering":
+        # Steering snapshots already contain the complete selected initial cohort.
+        request["render_motion_file"] = request["motion_file"]
+        request["render_motion_id"] = 0
+        return
     import torch
 
     source = Path(request["motion_file"])
@@ -91,6 +96,11 @@ def configure_video_inference(request, simulator, motion_lib, scene_lib, env):
     env.motion_manager.exclude_motion_ids = None
     env.motion_manager.exclude_motions_file = None
 
+    if request.get("kind") == "steering":
+        from protomotions.utils.steering_video import configure_steering_video
+
+        configure_steering_video(request, simulator, motion_lib, scene_lib, env)
+
 
 def blend_reference(base, overlay, opacity):
     """Keep the policy visible through reference geometry, independent of materials."""
@@ -109,7 +119,9 @@ def blend_reference(base, overlay, opacity):
 class FollowCamera:
     """A dedicated USD camera / RGB render product; no desktop viewport required."""
 
-    def __init__(self, simulator, width, height):
+    def __init__(
+        self, simulator, width, height, camera_path="/World/PolicyVideoCamera"
+    ):
         import omni.replicator.core as rep
         from pxr import UsdGeom
 
@@ -121,9 +133,7 @@ class FollowCamera:
         ensure_rtx_hydra_engine_attached()
         simulator._sim.set_setting("/isaaclab/video/enabled", True)
         self.width, self.height = width, height
-        self.camera = UsdGeom.Camera.Define(
-            simulator._sim.stage, "/World/PolicyVideoCamera"
-        )
+        self.camera = UsdGeom.Camera.Define(simulator._sim.stage, camera_path)
         self.camera.CreateFocalLengthAttr(24.0)
         self.camera.CreateHorizontalApertureAttr(24.0)
         self.camera.CreateVerticalApertureAttr(24.0 * height / width)
@@ -197,6 +207,10 @@ class FollowCamera:
 
 
 def record_policy_video(agent, request, checkpoint):
+    if request.get("kind") == "steering":
+        from protomotions.utils.steering_video import record_steering_video
+
+        return record_steering_video(agent, request, checkpoint)
     import imageio.v2 as imageio
     import torch
 
