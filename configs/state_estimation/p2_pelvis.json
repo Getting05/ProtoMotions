@@ -1,0 +1,16 @@
+{
+  "history_length": 25,
+  "control_frequency": 50,
+  "batch_size": 256,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.0001,
+  "epochs": 50,
+  "seed": 42,
+  "model": {"hidden": 256, "layers": 2, "contact_hidden": 128, "disagreement": [0.08, 0.3, 0.3, 0.3]},
+  "target_scale": [0.5, 1.0, 1.0, 1.0],
+  "loss_weights": [1.0, 1.0, 0.2],
+  "noise": {"q_std": 0.002, "dq_std": 0.02, "torque_std": 0.5, "torque_bias_std": 0.2, "gravity_std": 0.005, "gyro_std": 0.01, "gyro_bias_std": 0.005, "accel_std": 0.1, "accel_bias_std": 0.05, "max_delay_frames": 1},
+  "contact": {"force_min": 30.0, "slip_max": 0.1},
+  "collection": {"friction_range": [0.3, 1.2], "push_interval_range": [2.0, 5.0], "push_linear_velocity": [0.3, 0.3, 0.0], "push_angular_velocity": [0.0, 0.0, 0.2]},
+  "acceptance": {"height_mae": 0.03, "xy_rmse": 0.1, "z_rmse": 0.15, "latency_p95_ms": 20.0}
+}
