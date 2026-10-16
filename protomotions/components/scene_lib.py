@@ -1018,6 +1018,8 @@ class SceneLibConfig:
     """
 
     _target_: str = "protomotions.components.scene_lib.SceneLib"
+    require_motion_scene_binding: bool = False
+
     scene_file: str = field(
         default=None,
         metadata={

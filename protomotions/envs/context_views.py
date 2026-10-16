@@ -556,6 +556,14 @@ class SceneSurfaceContext:
 # =============================================================================
 
 
+class WholeBodyContactContext:
+    state: Tensor = FieldPath()
+    confidence: Tensor = FieldPath()
+    future_state: Tensor = FieldPath()
+    future_confidence: Tensor = FieldPath()
+    expected_patch_match: Tensor = FieldPath()
+
+
 class EnvContext:
     """Complete typed context for observation, reward, and termination functions.
 
@@ -630,6 +638,8 @@ class EnvContext:
     odom_start_heading_inv: Optional[Tensor] = FieldPath()
     odom_disp_start_corrupt: Optional[Tensor] = FieldPath()
     odom_disp_start_clean: Optional[Tensor] = FieldPath()
+
+    whole_body_contact: Optional[WholeBodyContactContext] = NestedField(WholeBodyContactContext)
 
     # Control-specific contexts (populated by controllers via populate_context)
     mimic: Optional[MimicContext] = NestedField(MimicContext)

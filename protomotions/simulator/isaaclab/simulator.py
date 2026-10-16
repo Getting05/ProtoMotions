@@ -425,9 +425,20 @@ class IsaacLabSimulator(Simulator):
             )
             for obj_idx, object in enumerate(self._object):
                 objects_start_pos[:, :7] = self._initial_scene_pos[:, obj_idx, :]
-                object.write_root_state_to_sim(objects_start_pos)
+                self._write_scene_object_state(obj_idx, objects_start_pos)
 
         self._apply_domain_randomization_if_needed()
+
+    def _write_scene_object_state(self, object_idx, states, env_ids=None):
+        from protomotions.simulator.base_simulator.scene_state import write_scene_object_state
+
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        fixed = torch.tensor(
+            [bool(self.scene_lib.scenes[i].objects[object_idx].options.fix_base_link)
+             for i in env_ids.cpu().tolist()], device=states.device, dtype=torch.bool,
+        )
+        write_scene_object_state(self._object[object_idx], states, env_ids, fixed)
 
     def _apply_domain_randomization_if_needed(self) -> None:
         all_env_ids = torch.arange(self.config.num_envs, dtype=torch.int)
@@ -679,8 +690,8 @@ class IsaacLabSimulator(Simulator):
                 dim=-1,
             ).reshape(len(env_ids), self.scene_lib.num_objects_per_scene, 13)
             for object_idx in range(len(self._object)):
-                self._object[object_idx].write_root_state_to_sim(
-                    init_object_root_state[:, object_idx], env_ids
+                self._write_scene_object_state(
+                    object_idx, init_object_root_state[:, object_idx], env_ids
                 )
 
     # =====================================================

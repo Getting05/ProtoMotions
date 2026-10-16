@@ -212,6 +212,21 @@ def build_all_components(
                     "for motion-paired scenes"
                 )
 
+    if getattr(scene_config, "require_motion_scene_binding", False):
+        from protomotions.components.motion_scene_contact import validate_binding
+        from protomotions.assets import resolve_asset_root
+
+        if scene_config.scene_file is None:
+            raise ValueError("Whole-body scenes require a bound scene file")
+        binding = validate_binding(
+            scene_config.scene_file, motion_lib,
+            Path(resolve_asset_root(robot_config.asset.asset_root)) / robot_config.asset.asset_file_name,
+        )
+        assigned = scene_lib.get_per_env_humanoid_motion_ids_tensor()
+        if bool((assigned < 0).any()) or not set(assigned.cpu().tolist()).issubset(binding["motion_ids"]):
+            raise ValueError("Every whole-body scene environment must have its paired motion")
+        scene_lib.motion_scene_binding = binding
+
     # Create simulator shell
     simulator = build_simulator_from_config(
         simulator_config,
