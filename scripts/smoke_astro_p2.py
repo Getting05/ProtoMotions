@@ -41,6 +41,7 @@ for name, q in zip(r.kinematic_info.dof_names, r.default_dof_pos):
     ci = r.control.control_info[name]
     assert ci.effort_limit == float(bound['effort']), name
     assert ci.velocity_limit == float(bound['velocity']), name
+    np.testing.assert_allclose(model.dof_armature[model.joint(name).dofadr], ci.armature, rtol=1e-12, err_msg=name)
 assert set(r.control.control_info) == set(r.kinematic_info.dof_names)
 for names in r.common_naming_to_robot_body_names.values():
     assert set(names) <= set(r.kinematic_info.body_names)
@@ -61,6 +62,25 @@ t = Terrain(config=tc, num_envs=a.num_envs, device=device)
 sim = get_class(c._target_)(config=c, robot_config=r, terrain=t, scene_lib=SceneLib.empty(num_envs=a.num_envs, device=device), device=device, **extra)
 try:
     sim._initialize_with_markers({})
+    if a.simulator == 'isaaclab':
+        # Read PhysX properties after actuator initialization, not only config.
+        import warp as wp
+        from protomotions.simulator.isaaclab.utils.actuator_groups import build_isaaclab_joint_name_map
+        backend = sim._robot
+        names = build_isaaclab_joint_name_map(r.kinematic_info)
+        for getter, field in (
+            ('get_dof_stiffnesses', 'stiffness'),
+            ('get_dof_dampings', 'damping'),
+            ('get_dof_armatures', 'armature'),
+            ('get_dof_max_forces', 'effort_limit'),
+            ('get_dof_max_velocities', 'velocity_limit'),
+        ):
+            actual = wp.to_torch(getattr(backend.root_view, getter)()).cpu().numpy()
+            expected = np.array([getattr(r.control.control_info[names.backend_to_semantic[name]], field)
+                                 for name in backend.joint_names])
+            np.testing.assert_allclose(actual, np.broadcast_to(expected, actual.shape), rtol=1e-5, atol=1e-6,
+                                       err_msg=f'PhysX {field}')
+        print('P2_PHYSX_PARAMETERS_PASS joints=30 fields=stiffness,damping,armature,effort_limit,velocity_limit', flush=True)
     state = sim.get_default_robot_reset_state()
     xy = t.sample_valid_locations(a.num_envs)
     state.root_pos[:, :2] = xy
