@@ -1,0 +1,237 @@
+{
+  "status": "rendered_and_verified",
+  "reference_poses_modified": false,
+  "controller_rollout_performed": false,
+  "samples": [
+    {
+      "train_shard": 7,
+      "motion_id": 9977,
+      "source_key": "/data/chenguanting/datasets/BONES-SEED/p2_retarget/bvh/230323/stairs_climbing_up_start_R_001__A300.pkl",
+      "frames": 180,
+      "dt": 0.03333200141787529,
+      "status": "needs_review",
+      "training_eligible": false,
+      "reasons": [
+        "large_support_moment_residual"
+      ],
+      "retained_treads": 8,
+      "heights_m": [
+        0.0776539522800664,
+        0.2254562492380652,
+        0.35090243532313925,
+        0.47298673619652987,
+        0.5854664649505953,
+        0.7037562012971968,
+        0.8285262399651578,
+        0.9511272186669094
+      ],
+      "max_tread_penetration_m": 0.005999999999999988,
+      "geometry_frames_checked": 180,
+      "support_frames_checked": 180,
+      "force_residual_p95_bodyweights": 0.07670774439416415,
+      "moment_residual_p95_normalized": 0.2275007736319723,
+      "baseline_force_residual_p95_bodyweights": 1.2787231021978214,
+      "baseline_moment_residual_p95_normalized": 0.23700270965172932,
+      "extra_generic_hypotheses": [
+        {
+          "object_id": 2,
+          "kind": "wall"
+        },
+        {
+          "object_id": 4,
+          "kind": "wall"
+        }
+      ],
+      "scene_file": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/upstairs_reconstruction_20261016/stairs_fit/train7_9977/static_scenes/009977_3d43d41cdd3a.json",
+      "scene_sha256": "d8e1f9d0a4abc435b093364fea34f48f846597c175a7a7cfc9434090ff8cc180",
+      "source_motion_sha256": "3d43d41cdd3a53bfe08c49804c41191bc4bb06a32b20c53a6554c3157908592c",
+      "scene_origin_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "train_shard": 1,
+      "motion_id": 9963,
+      "source_key": "/data/chenguanting/datasets/BONES-SEED/p2_retarget/bvh/230323/stairs_climbing_up_start_R_102__A301.pkl",
+      "frames": 143,
+      "dt": 0.03333200141787529,
+      "status": "needs_review",
+      "training_eligible": false,
+      "reasons": [
+        "large_support_moment_residual",
+        "reference_self_collision"
+      ],
+      "retained_treads": 8,
+      "heights_m": [
+        0.11267365381210459,
+        0.25924047569418396,
+        0.39904803608316225,
+        0.5322295828982597,
+        0.6647579976510507,
+        0.7941691071830298,
+        0.9302985014283899,
+        1.052554801714511
+      ],
+      "max_tread_penetration_m": 0.007125253231356477,
+      "geometry_frames_checked": 143,
+      "support_frames_checked": 143,
+      "force_residual_p95_bodyweights": 0.06810279287133277,
+      "moment_residual_p95_normalized": 0.238173370108469,
+      "baseline_force_residual_p95_bodyweights": 1.429934157666244,
+      "baseline_moment_residual_p95_normalized": 0.22540760107488142,
+      "extra_generic_hypotheses": [],
+      "scene_file": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/upstairs_reconstruction_20261016/stairs_fit/train1_9963/static_scenes/009963_9349ed83423f.json",
+      "scene_sha256": "4fef33b5536271a2591b30470f9ca99497eeaf6fe6bca474b95bf9315ebd1cd6",
+      "source_motion_sha256": "9349ed83423f9c29ce0dcdc21cae44f02e699499e1c6e1a631e51f3b9ced6311",
+      "scene_origin_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "train_shard": 5,
+      "motion_id": 9985,
+      "source_key": "/data/chenguanting/datasets/BONES-SEED/p2_retarget/bvh/230323/stairs_climbing_jog_up_start_R_001__A300.pkl",
+      "frames": 98,
+      "dt": 0.03333200141787529,
+      "status": "needs_review",
+      "training_eligible": false,
+      "reasons": [
+        "large_support_force_residual",
+        "large_support_moment_residual"
+      ],
+      "retained_treads": 8,
+      "heights_m": [
+        0.0949504453656925,
+        0.22413685638988093,
+        0.3484698682355817,
+        0.46043796223424166,
+        0.5840639308005452,
+        0.7053743052278432,
+        0.8303025982923555,
+        0.9476840522268966
+      ],
+      "max_tread_penetration_m": 0.0008787505146584003,
+      "geometry_frames_checked": 98,
+      "support_frames_checked": 98,
+      "force_residual_p95_bodyweights": 1.6694089570616473,
+      "moment_residual_p95_normalized": 0.27847998170924265,
+      "baseline_force_residual_p95_bodyweights": 1.7096208161783177,
+      "baseline_moment_residual_p95_normalized": 0.2289627949504377,
+      "extra_generic_hypotheses": [],
+      "scene_file": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/upstairs_reconstruction_20261016/stairs_fit/train5_9985/static_scenes/009985_62e17baa6c7e.json",
+      "scene_sha256": "20a24833cbdbeed0b88f8f8c13e817a5eb054419979ba5ca298e80dc72282423",
+      "source_motion_sha256": "62e17baa6c7ead7c9c8443bc991bfdd0541364acf4dd1e129d0939c68a717cc2",
+      "scene_origin_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "train_shard": 0,
+      "motion_id": 9969,
+      "source_key": "/data/chenguanting/datasets/BONES-SEED/p2_retarget/bvh/230323/stairs_climbing_jog_up_start_R_003__A300.pkl",
+      "frames": 140,
+      "dt": 0.03333200141787529,
+      "status": "needs_review",
+      "training_eligible": false,
+      "reasons": [
+        "large_support_force_residual",
+        "large_support_moment_residual",
+        "reference_self_collision"
+      ],
+      "retained_treads": 3,
+      "heights_m": [
+        0.08820684033315118,
+        0.3545894354221358,
+        0.7056901828957199
+      ],
+      "max_tread_penetration_m": 0.007773009790309764,
+      "geometry_frames_checked": 140,
+      "support_frames_checked": 140,
+      "force_residual_p95_bodyweights": 1.7139187851914528,
+      "moment_residual_p95_normalized": 0.24918382378251647,
+      "baseline_force_residual_p95_bodyweights": 1.6401691225001473,
+      "baseline_moment_residual_p95_normalized": 0.6653241843904809,
+      "extra_generic_hypotheses": [
+        {
+          "object_id": 0,
+          "kind": "wall"
+        }
+      ],
+      "scene_file": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/upstairs_reconstruction_20261016/stairs_fit/train0_9969/static_scenes/009969_4c300de81cae.json",
+      "scene_sha256": "50e2d4953301c28a36c3e60657685796f86151f63b4bb7d494acc1aa18c76934",
+      "source_motion_sha256": "4c300de81caed30d020fddfffc54df4dda372a6448ab82ba1e935437b44ed0fe",
+      "scene_origin_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "videos": [
+    {
+      "file": "p2_stairs_train0_motion9969.mp4",
+      "frames": 140,
+      "size": [
+        1280,
+        800
+      ],
+      "sha256": "36007ecd2692bb04bbf97918a1f26bee39450d415b3ad075e6ecc0f2b2dac28d",
+      "bytes": 764324,
+      "full_decode": "passed"
+    },
+    {
+      "file": "p2_stairs_train1_motion9963.mp4",
+      "frames": 143,
+      "size": [
+        1280,
+        800
+      ],
+      "sha256": "758e387940b19fe2f0a3d4bb5011a436b198b60dd00fc13bea6205b06d1ad93d",
+      "bytes": 841959,
+      "full_decode": "passed"
+    },
+    {
+      "file": "p2_stairs_train5_motion9985.mp4",
+      "frames": 98,
+      "size": [
+        1280,
+        800
+      ],
+      "sha256": "cc1b3f490bdef9bf415e4e7d4f552e31d441e67178d2a8068b13c4aa626fc021",
+      "bytes": 708339,
+      "full_decode": "passed"
+    },
+    {
+      "file": "p2_stairs_train7_motion9977.mp4",
+      "frames": 180,
+      "size": [
+        1280,
+        800
+      ],
+      "sha256": "6f2a4a0dc7bb960ebcec40f8f4ab9c4095af0d9d8f7cdea25977ff36e06f1bae",
+      "bytes": 1119197,
+      "full_decode": "passed"
+    }
+  ],
+  "regression_tests_passed": 144,
+  "training_started": false,
+  "all_samples_training_eligible": false,
+  "total_frames": 561,
+  "limitations": [
+    "Horizontal treads, common width and ground completion are structural priors.",
+    "Source train0/9969 has only three supported levels; reconstruction is incomplete.",
+    "Other generic contact hypotheses are shown amber and may be false positives.",
+    "Support residuals remain above quality thresholds; no closed-loop controller rollout was performed."
+  ],
+  "date": "2026-10-16",
+  "host": "atom8@172.16.9.7",
+  "branch": "codex/bones-p2-whole-body-scenes",
+  "remote_output": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/upstairs_reconstruction_20261016",
+  "locally_transferred_video_hashes_verified": true
+}

@@ -99,6 +99,40 @@ been reconstructed. Pilot runtime and acceptance should be reviewed first.
 Add `--limit-per-shard` for a bounded pilot. A shard with no eligible scenes fails
 packing; it never silently substitutes flat ground or another data split.
 
+## Stair reconstruction and joint visualization
+
+Use `--static-scene-mode stairs` for an explicitly selected ascending-stair
+cohort. The full-body detector still runs. The extra structural prior groups
+normal-approach/stop evidence on the soles into support windows, estimates
+horizontal support heights, and bounds each riser against the entire recorded
+robot sweep. Tread width is the observed foot corridor plus a margin, and solid
+completion down to the ground is a prior. Missing support levels are not
+interpolated. Exact MuJoCo checks still cover every frame and every retained
+collider; reference joint poses and root trajectories are unchanged.
+
+```bash
+$PYTHON -m scripts.whole_body_scene.run \
+  --motion-file /path/to/source_shard.pt --ids 9977 \
+  --output /path/to/stairs --static-scene-mode stairs --support-frames 0
+
+$PYTHON -m scripts.whole_body_scene.render_scene \
+  --manifest /path/to/stairs/manifest.jsonl --motion-id 9977 \
+  --model "$PROTOMOTIONS_ASSET_ROOT/astro_p2/mjcf/astro_p2_protomotions.xml" \
+  --output /path/to/p2_with_stairs.mp4 --title "Walk upstairs"
+```
+
+The video shows the actual retained scene boxes with the reference robot, plus
+a travel/height projection of the same geometry, body origins and sole paths.
+Teal/blue denotes inferred treads; amber denotes other contact hypotheses from
+the generic full-body fitter. It checks source-motion, scene and model identity
+before rendering and displays the quality status. It is kinematic replay, not
+a policy rollout. A visually plausible staircase can remain `needs_review`.
+
+On the four inspected source motions, train-7/9977, train-1/9963 and train-5/9985
+retain eight treads each. Train-0/9969 has only three supported levels and is a
+partial reconstruction. All four remain outside the eligible training set due
+to support residuals, with additional reference self-collision on 9963/9969.
+
 ## Persistent motion exclusions
 
 `protomotions/data/motion_exclusions.json` is loaded automatically by offline

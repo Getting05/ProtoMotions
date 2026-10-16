@@ -8,6 +8,7 @@ from .geometry import unit
 
 @dataclass
 class InferenceConfig:
+    static_scene_mode: str = "generic"
     samples_per_geom: int = 24
     speed_enter: float = 0.10
     speed_exit: float = 0.22

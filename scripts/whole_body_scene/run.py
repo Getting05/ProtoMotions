@@ -56,8 +56,15 @@ def process_one(archive,collision,index,output,cfg,source_hash,config_hash,suppo
     print(f"motion {index}: {len(events)} contact candidates; fitting geometry",flush=True)
     dynamic=detect_dynamic(collision,motion,cfg)
     scene=reconstruct_static(events,points,collision,cfg)
+    if cfg.static_scene_mode == "stairs":
+        from .stairs import reconstruct_stairs
+        scene = reconstruct_stairs(scene, events, points, normals, collision, motion, cfg)
     print(f"motion {index}: {len(scene['objects'])} objects; exact collision replay",flush=True)
     geometry=validate_geometry(collision,motion,scene,events,cfg)
+    if "stairs_inference" in scene:
+        retained = {o["object_id"] for o in scene["objects"]}
+        scene["stairs_inference"]["retained_object_ids"] = [
+            h["object_id"] for h in scene["stairs_inference"]["accepted_levels"] if h["object_id"] in retained]
     labels,contact_metrics=build_labels(collision,motion,points,normals,scene,events,cfg)
     # Dynamic evidence is unknown supervision, even if empty-scene clearance
     # had suggested a negative. Accepted static positives remain independent.
@@ -69,6 +76,8 @@ def process_one(archive,collision,index,output,cfg,source_hash,config_hash,suppo
             labels["link_confidence"][a:z,b][unknown]=0
     support=validate_support(collision,motion,labels,cfg,support_frames)
     reasons=[]
+    if cfg.static_scene_mode == "stairs" and len(scene.get("stairs_inference", {}).get("retained_object_ids", [])) < 3:
+        reasons.append("insufficient_validated_stair_levels")
     if not geometry["ground_pass"]: reasons.append("reference_penetrates_simulator_ground")
     if not scene["objects"]: reasons.append("no_explained_static_support")
     if dynamic["hypotheses"]: reasons.append("dynamic_object_hypothesis_requires_review")
@@ -120,6 +129,8 @@ def main():
     p.add_argument("--samples-per-geom",type=int,default=24)
     p.add_argument("--support-frames",type=int,default=32,help="0 checks all frames")
     p.add_argument("--config",help="JSON overrides of InferenceConfig")
+    p.add_argument("--static-scene-mode", choices=["generic", "stairs"], default=None,
+                   help="Optional explicit horizontal staircase structural prior")
     p.add_argument("--exclude-file",action="append",default=[],help="Additional key-based exclusions; repository policy always applies")
     args=p.parse_args()
     if args.stride<1 or args.offset<0 or args.samples_per_geom<4 or args.support_frames<0:
@@ -130,6 +141,10 @@ def main():
         for k,v in json.loads(Path(args.config).read_text()).items():
             if k not in {f.name for f in fields(cfg)}: raise ValueError(f"Unknown config key {k}")
             setattr(cfg,k,v)
+    if args.static_scene_mode is not None:
+        cfg.static_scene_mode = args.static_scene_mode
+    if cfg.static_scene_mode not in ("generic", "stairs"):
+        raise ValueError("Unknown static_scene_mode")
     output=Path(args.output).resolve(); output.mkdir(parents=True,exist_ok=True)
     # Output lock prevents simultaneous manifest writers/resume corruption.
     import fcntl
@@ -144,7 +159,7 @@ def main():
         signature={"inference":cfg.to_dict(),"support_frames":args.support_frames,
                    "asset_sha256":collision.asset_sha256,"schema_version":1,
                    "algorithm_sha256":hashlib.sha256("".join(sha256(Path(__file__).parent/name) for name in
-                       ("geometry.py","extract_motion.py","contacts.py","reconstruct.py","validation.py","run.py")).encode()).hexdigest()}
+                       ("geometry.py","extract_motion.py","contacts.py","reconstruct.py","stairs.py","validation.py","run.py")).encode()).hexdigest()}
         config_hash=hashlib.sha256(json.dumps(signature,sort_keys=True).encode()).hexdigest()
         source_hash=sha256(archive.path)
         signature.update(config_sha256=config_hash,motion_file_sha256=source_hash,motion_shard=str(archive.path))
