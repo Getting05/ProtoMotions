@@ -131,8 +131,8 @@ a policy rollout. A visually plausible staircase can remain `needs_review`.
 The default minimum individual contact event duration is now **0.08 seconds**
 (three frames at this dataset's approximately 30 Hz), with an explicit profile
 in `configs/stairs_duration008.json`. The separate 0.22-second dwell for slow
-pelvis/waist/knee support and the existing consensus and geometry thresholds
-remain unchanged. Pass the profile with
+pelvis/waist/knee support and the geometry thresholds remain unchanged.
+The duration-only experiment below preceded the consensus fixes described next. Pass the profile with
 `--config scripts/whole_body_scene/configs/stairs_duration008.json`.
 
 The initial 0.12-second run retained eight treads each for train-7/9977,
@@ -150,8 +150,8 @@ train-1/9963 and train-5/9985, but only three for train-0/9969. The complete
 | train7 / 9979 | additional walk | 7 | 7 |
 | train2 / 9961 | additional walk | 7 | 8 |
 
-All 1,088 reference frames were checked for geometry and support forces. Only
-train7/9979 passes the current offline eligibility thresholds; the other seven
+All 1,088 reference frames were checked for geometry and support forces. In that duration-only baseline, only
+train7/9979 passed the offline eligibility thresholds; the other seven
 remain `needs_review`. No new training or closed-loop controller evaluation was
 started. Shorter dwell also affects non-foot candidates: additional generic
 contact hypotheses are visible in amber and require review. More detected
@@ -160,6 +160,65 @@ The two additional jogs still contain gaps in their recovered stair profiles.
 `DURATION008_VALIDATION.json` records the complete comparison and video hashes.
 Output on machine 2 is
 `/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/stairs_duration008_20261016`.
+
+## Fixed consensus and continuous supported intervals
+
+The updated stair detector counts unique surface sample IDs once per frame and
+requires at least three simultaneous samples for 0.08 seconds. It no longer
+scales this threshold with the strongest footfall elsewhere in the clip.
+Overlapping or duplicate events cannot inflate the sample count.
+
+If the full observed window fails the 50% support-coverage test, the fitter can
+retain its longest continuous interval with at least three downward-facing sole
+samples inside the existing contact-distance and swept-space constraints. The
+interval must still last at least 0.08 seconds; disconnected short fragments
+cannot be combined. The original window, coverage and trimmed interval are
+recorded in the scene. Existing full-window candidates take precedence.
+
+Each tread ends no farther than its observed forward foot extent plus 3 cm.
+Unobserved gaps remain explicit instead of becoming overlong treads. Exact
+all-frame collision validation and offline training-eligibility checks still
+apply; source joint trajectories are not fitted to the reconstructed geometry.
+
+The 2026-10-16 validation cohort uses 12 distinct non-mirrored ascending motions:
+
+| Source shard / local ID | Final retained treads |
+| --- | ---: |
+| train0 / 9969 | 9 |
+| train1 / 9962 | 8 |
+| train1 / 9963 | 8 |
+| train2 / 9961 | 8 |
+| train3 / 9973 | 8 |
+| train5 / 9985 | 8 |
+| train5 / 9986 | 9 |
+| train6 / 9982 | 8 |
+| train6 / 9983 | 8 |
+| train7 / 9975 | 8 |
+| train7 / 9977 | 8 |
+| train7 / 9979 | 7 |
+
+Compared with the duration-only baseline, 9962 improves from six to eight treads
+and 9986 from seven to nine. On the expanded cohort, 9983 initially retained six:
+its two rejected windows contained 10-frame supported segments, diluted to
+43% and 48% coverage over their original windows. The interval fallback recovers
+both observed levels, producing eight retained treads with no interpolated gap.
+
+Four generic-mode controls cover train0/9953 (ladder ascent), 10029 (obstacle
+vault), 5061 (crawl transition), and 263 (kneeling to standing). Generic fitting
+still produces incomplete or spurious auxiliary geometry for these motions;
+this is a limitation, not successful recovery of a complete ladder or obstacle.
+All 16 samples remain `needs_review`; none are newly training-eligible. In
+particular, train7/9979 changes from eligible in the duration-only baseline to
+review because moment residual p95 is 0.200109, just above the 0.2 threshold.
+The thresholds were not relaxed. Crawling and kneeling retain explicit constant
+floor-clearance origin offsets (17.38 mm and 11.27 mm); all stair offsets are zero.
+
+The final regression suite passes 152 tests. Both geometry and support checks
+cover all 2,345 frames. No new training or controller rollout was launched.
+Machine-2 result roots are:
+
+- `/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/stairs_supported_intervals_20261016`
+- `/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/diverse_contacts_20261016`
 
 ## Persistent motion exclusions
 

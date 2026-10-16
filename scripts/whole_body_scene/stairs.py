@@ -15,14 +15,30 @@ def support_windows(events, body_id, frames, dt):
                 and e["normal"][2] > .9 and e["point"][2] > .04
                 and e["evidence"].get("deceleration", False)
                 and e["evidence"].get("max_approach_speed", 0.) >= .08]
-    counts = np.zeros(frames, dtype=int)
+    # Each physical surface sample gets one vote per frame. Overlapping or
+    # duplicated events must not inflate support, and another footfall's peak
+    # must not raise the threshold for this footfall.
+    sample_ids = sorted({e["sample_id"] for e in evidence})
+    active = np.zeros((frames, len(sample_ids)), dtype=bool)
+    columns = {sample: column for column, sample in enumerate(sample_ids)}
     for e in evidence:
-        counts[e["start"]:e["end"]] += 1
-    if not counts.max():
-        return []
-    # Aggregate sample events after the configurable per-event dwell filter.
-    return [(int(a), int(z)) for a, z in runs(counts >= max(3, counts.max() * .25))
+        active[e["start"]:e["end"], columns[e["sample_id"]]] = True
+    counts = active.sum(axis=1)
+    return [(int(a), int(z)) for a, z in runs(counts >= 3)
             if (z - a) * dt >= .08]
+
+
+def tread_end(foot_forward_max, next_leading=None):
+    """Bound completion by this footfall rather than bridging missing levels."""
+    observed_limit = float(foot_forward_max) + .03
+    return observed_limit if next_leading is None else min(float(next_leading), observed_limit)
+
+
+def supported_interval(contact, normal_z, dt, normal_cos):
+    """Longest continuous sole-support interval; never join separated fragments."""
+    supported = (contact & (-normal_z >= normal_cos)).sum(axis=1) >= 3
+    intervals = [(int(a), int(z)) for a, z in runs(supported) if (z - a) * dt >= .08]
+    return max(intervals, key=lambda az: az[1] - az[0], default=None)
 
 
 def safe_riser(points_local, height, lateral_lo, lateral_hi, tolerance):
@@ -43,7 +59,11 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
     delta[2] = 0.
     report = {"structural_prior": "horizontal grounded treads across observed foot corridor",
               "width_is_observed_corridor_plus_margin": True,
-              "unobserved_levels_filled": False, "accepted_levels": [], "rejected_levels": []}
+              "unobserved_levels_filled": False, "accepted_levels": [], "rejected_levels": [],
+              "support_window_rule": {"minimum_unique_samples": 3, "minimum_duration_s": .08,
+                                      "whole_motion_peak_used": False},
+              "partial_support_rule": "continuous oriented sole support >= 0.08s within observed window",
+              "tread_completion_margin_m": .03, "unobserved_gaps": []}
     scene["stairs_inference"] = report
     if len(feet) != 2 or np.linalg.norm(delta) < .3:
         report["status"] = "insufficient_ascending_motion"
@@ -66,6 +86,7 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
                 continue
             center = float(np.median(motion.pos[a:z, body] @ forward))
             best = None
+            partial = None
             for retreat in np.linspace(0., cfg.contact_tolerance, 6):
                 height = original_height - retreat
                 leading = safe_riser(local.reshape(-1, 3), height, lo, hi, cfg.penetration_tolerance)
@@ -79,6 +100,23 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
                             "normal_retreat_m": float(retreat),
                             "contact_frame_fraction": frame_coverage}
                     break
+                # A rolling foot can dilute a real stance inside a longer stop
+                # window. Keep only its observed continuous support, with the
+                # same swept-space bound and no relaxation of contact distance.
+                interval = supported_interval(contact, normals[a:z, mask, 2], motion.dt, cfg.normal_cos)
+                if interval is not None:
+                    begin, end = a + interval[0], a + interval[1]
+                    partial_center = float(np.median(motion.pos[begin:end, body] @ forward))
+                    if leading <= partial_center + .04 and (
+                            partial is None or end - begin > partial["end"] - partial["start"]):
+                        partial = {"body_id": body, "start": begin, "end": end, "height": height,
+                                   "leading": leading, "center": partial_center,
+                                   "foot_forward_max": float(foot[begin:end, :, 0].max()),
+                                   "normal_retreat_m": float(retreat), "contact_frame_fraction": 1.,
+                                   "support_interval_trimmed": True, "original_window": [a, z],
+                                   "original_contact_frame_fraction": frame_coverage}
+            if best is None:
+                best = partial
             if best is None:
                 report["rejected_levels"].append({"body_id": body, "start": a, "end": z,
                     "height": original_height, "reason": "no_swept_safe_supported_tread"})
@@ -106,7 +144,8 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
             e.update(object_id=-1, status="unknown", reason="replaced_by_stair_support_prior")
     next_id = max([o["object_id"] for o in scene["objects"]] + list(removed) + [-1]) + 1
     for index, h in enumerate(accepted):
-        end = accepted[index + 1]["leading"] if index + 1 < len(accepted) else h["foot_forward_max"] + .03
+        next_leading = accepted[index + 1]["leading"] if index + 1 < len(accepted) else None
+        end = tread_end(h["foot_forward_max"], next_leading)
         if end - h["leading"] < .06:
             report["rejected_levels"].append(dict(h, reason="insufficient_tread_depth"))
             continue
@@ -140,5 +179,9 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
             "normal_retreat_m": h["normal_retreat_m"],
             "observed_support": dict(h)})
         report["accepted_levels"].append(dict(h, object_id=oid, trailing=end))
+        if next_leading is not None and next_leading > end + 1e-6:
+            report["unobserved_gaps"].append({"after_object_id": oid, "start": end,
+                "end": next_leading, "length_m": next_leading - end,
+                "reason": "beyond_observed_footfall_extent"})
     report["status"] = "candidate_requires_exact_validation"
     return scene
