@@ -197,6 +197,11 @@ def build_all_components(
     scene_lib = build_scene_lib_from_config(
         scene_config, simulator_config.num_envs, device, terrain, scene_weights
     )
+    # A paired scene cannot silently switch to another motion after exclusion.
+    from protomotions.components.motion_exclusions import require_allowed_motion_ids
+    assigned_motion_ids = scene_lib.get_per_env_humanoid_motion_ids_tensor()
+    if assigned_motion_ids is not None:
+        require_allowed_motion_ids(motion_lib, assigned_motion_ids[assigned_motion_ids >= 0])
 
     if motion_lib_config.motion_file_switch_mode is not MotionFileSwitchMode.FIXED:
         paired_motion_ids = scene_lib.get_humanoid_motion_ids()

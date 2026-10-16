@@ -55,9 +55,15 @@ and ongoing training are independent. Use the existing runtime and asset tree:
 cd /data/chenguanting/ProtoMotions-wbc-scene
 export PYTHONPATH=.
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MUJOCO_GL=egl
-export PROTOMOTIONS_ASSET_ROOT=/data/chenguanting/ProtoMotions/protomotions/data/assets
+export PROTOMOTIONS_ASSET_ROOT=/data/chenguanting/ProtoMotions-wbc-scene/results/wbc_assets
 PYTHON=/data/chenguanting/.venvs/protomotions-isaaclab/bin/python
 ```
+
+`results/wbc_assets` contains the reconstruction branch's MJCF and reuses the
+existing visual meshes. Its MJCF SHA256 is
+`8fd5b8b969a52852519f998bd91699de7cd4b2b43f9d8c9b6b069e60bcb7d906`.
+The main checkout's model changed during this task; scene bindings correctly
+reject it. Use the matching asset snapshot for this existing scene bundle.
 
 Example representative validation cohort (no GPU required):
 
@@ -65,7 +71,7 @@ Example representative validation cohort (no GPU required):
 $PYTHON -m scripts.whole_body_scene.run \
   --motion-file /data/chenguanting/datasets/BONES-SEED/p2_motionlib_lze_contact_orin/bones_seed_validation_astro_p2.pt \
   --output /data/chenguanting/datasets/BONES-SEED/whole_body_scenes/validation_demo \
-  --ids 2054,1408,4524,4522,4336,3588,1074,6146 --support-frames 0
+  --ids 2054,1408,4336,3588,1074,6146 --support-frames 0
 
 $PYTHON -m scripts.whole_body_scene.pack \
   --manifest /data/chenguanting/datasets/BONES-SEED/whole_body_scenes/validation_demo/manifest.jsonl \
@@ -92,6 +98,57 @@ This is a full-corpus command, not a claim that the entire corpus has already
 been reconstructed. Pilot runtime and acceptance should be reviewed first.
 Add `--limit-per-shard` for a bounded pilot. A shard with no eligible scenes fails
 packing; it never silently substitutes flat ground or another data split.
+
+## Persistent motion exclusions
+
+`protomotions/data/motion_exclusions.json` is loaded automatically by offline
+reconstruction, scene packing and MotionLib for every training stage and
+evaluation on this branch. The two rejected downstairs sources are excluded by
+key, including their terminal `_M` mirrors. In the current validation shard,
+these resolve to IDs **4522, 4523, 4524, 4525**. The full ten-shard audit found
+no copies in train or test. Paths may move and derived packages may renumber
+motions: matching uses a path-component suffix rather than a global integer ID.
+
+Add another rejected source using the ID in its exact input shard:
+
+```bash
+$PYTHON -m scripts.motion_exclusions add \
+  --motion-file /path/to/source_shard.pt --ids 12,34 \
+  --reason 'Bad retarget trajectory'
+```
+
+This updates the repository policy. Mirrors are included by default; use
+`--exact-only` to exclude only the selected variant. Use `--file /path/to/extra.json`
+to write an additional policy instead. Pass that additional file with
+`--exclude-file` to reconstruction/packing/audit and with
+`--motion-exclusion-file` to `protomotions.train_agent`. These options are
+repeatable and additive; repository rules always apply, including when an old
+`resolved_configs.pt` is restored. Policy edits take effect on the next load;
+already running processes are not modified.
+
+```bash
+$PYTHON -m scripts.motion_exclusions audit \
+  --motion-file /path/to/train_slurmrank.pt /path/to/validation.pt /path/to/test.pt \
+  --output /path/to/exclusion_audit.json
+
+$PYTHON -m scripts.motion_exclusions filter-manifest \
+  --manifest /path/to/reconstruction/manifest.jsonl
+```
+
+Filtering an existing manifest preserves a hash-named backup and excluded-row
+audit; source files and historical geometry remain available for diagnosis.
+The release pilot's active manifest now contains 10 records after removing
+4522 and 4524. Its accepted packed motion (source 1694) remains unchanged.
+
+MotionLib retains source IDs and frame tensors. Blocked sampling weights stay
+zero after curriculum updates and checkpoint restore. Evaluators enumerate
+only eligible IDs; an explicitly forced blocked motion or a scene paired with
+one fails before use. Repack such an old scene bundle after filtering instead
+of assigning a different motion to that scene. Empty eligible libraries fail
+explicitly. Packages missing source keys must be repackaged with their source
+identity so exclusions can be checked. Legacy MotionManager integer exclusions
+remain supported for sampling; use the shared key policy for exclusions across
+reconstruction, packing, training and evaluation.
 
 ## Coordinates and identities
 
@@ -169,7 +226,7 @@ change does not implement a new Stage 2 contact predictor or Stage 3 controller.
   clips 4522 and 4524 keep the feet near the floor while the pelvis descends
   almost to it. Their FK matches the P2 model; scene fitting cannot recover
   missing step heights without changing those reference trajectories. They
-  remain excluded by the support/self-collision quality screening. Source
+  and their mirrors are now explicitly excluded by the shared key policy. Source
   filenames are used for cohort selection, never as geometry evidence.
 - The explicit z=0 ground is a prior. Unobserved support legs and compound-object
   associations are also priors, separately labeled with low confidence.

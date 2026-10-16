@@ -153,6 +153,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 protomotions = [
+  "data/motion_exclusions.json",
   "data/assets/**/*",
   "data/assets/**/.asset_hash",
 ]

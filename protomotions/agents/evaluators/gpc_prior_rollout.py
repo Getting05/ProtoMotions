@@ -128,8 +128,10 @@ def run_prior_rollouts(evaluator, *, label='rollout'):
     cfg, env = evaluator.config, evaluator.env
     rank, world = evaluator.fabric.global_rank, evaluator.fabric.world_size
     shared = not env.motion_lib.different_motion_files_across_ranks
-    ids = select_rollout_ids(env.motion_lib.num_motions(),cfg.rollout_num_poses,cfg.seed,
-                            rank,world,shared).to(evaluator.device)
+    from protomotions.components.motion_exclusions import allowed_motion_ids
+    pool = allowed_motion_ids(env.motion_lib, evaluator.device)
+    ids = pool[select_rollout_ids(len(pool),cfg.rollout_num_poses,cfg.seed,
+                                rank,world,shared).to(evaluator.device)]
     repeated_ids = ids.repeat_interleave(cfg.rollouts_per_pose)
     bodies = _body_ids(env.robot_config,cfg.body_names)
     feet = _body_ids(env.robot_config,cfg.foot_names,feet=True)

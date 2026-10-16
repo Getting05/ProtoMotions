@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "exclusions": [
+    {
+      "id": "bones-p2-downstairs-A301",
+      "motion_key_suffix": "230323/stairs_climbing_down_loop_R_104__A301.pkl",
+      "include_mirrors": true,
+      "reason": "User excluded after P2 replay: feet remain near ground while pelvis descends and legs fold; unsuitable for terrain reconstruction or training.",
+      "source_reference": {"file": "bones_seed_validation_astro_p2.pt", "motion_local_id": 4522},
+      "added_on": "2026-10-16"
+    },
+    {
+      "id": "bones-p2-downstairs-A300",
+      "motion_key_suffix": "230323/stairs_climbing_jog_down_stop_R_002__A300.pkl",
+      "include_mirrors": true,
+      "reason": "User excluded after P2 replay: feet remain near ground while pelvis descends and legs fold; unsuitable for terrain reconstruction or training.",
+      "source_reference": {"file": "bones_seed_validation_astro_p2.pt", "motion_local_id": 4524},
+      "added_on": "2026-10-16"
+    }
+  ]
+}

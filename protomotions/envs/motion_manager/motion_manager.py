@@ -47,6 +47,7 @@ import torch
 import numpy as np
 from omegaconf.listconfig import ListConfig
 from protomotions.components.motion_lib import MotionLib
+from protomotions.components.motion_exclusions import allowed_motion_ids, require_allowed_motion_ids
 from protomotions.envs.motion_manager.config import MotionManagerConfig
 from typing import Optional, Tuple
 
@@ -85,6 +86,9 @@ class MotionManager:
             self.num_envs, dtype=torch.long, device=self.device
         )
         self.motion_times = torch.zeros(num_envs, device=device)
+        eligible = allowed_motion_ids(motion_lib, device)
+        if eligible.numel():
+            self.motion_ids.fill_(int(eligible[0]))
 
         # Sampling vectors
         self.init_start_probs = (
@@ -121,7 +125,8 @@ class MotionManager:
         subset_method = self.config.subset_method
 
         total_motions = self.motion_lib.num_motions()
-        if subset_method is None or self.num_envs > total_motions:
+        eligible = allowed_motion_ids(self.motion_lib, self.device)
+        if subset_method is None or (isinstance(subset_method, str) and self.num_envs > len(eligible)):
             # Use all motions
             self.available_motion_ids = None
             return
@@ -130,19 +135,15 @@ class MotionManager:
             if subset_method == "first":
                 # Use first min(num_envs, total_motions) motions
                 n_motions = min(self.num_envs, total_motions)
-                self.available_motion_ids = torch.arange(n_motions, device=self.device)
+                self.available_motion_ids = eligible[:n_motions]
             elif subset_method == "last":
                 # Use last min(num_envs, total_motions) motions
                 n_motions = min(self.num_envs, total_motions)
-                self.available_motion_ids = torch.arange(
-                    total_motions - n_motions, total_motions, device=self.device
-                )
+                self.available_motion_ids = eligible[-n_motions:]
             elif subset_method == "random":
                 # Randomly sample min(num_envs, total_motions) motions
                 n_motions = min(self.num_envs, total_motions)
-                self.available_motion_ids = torch.randperm(
-                    total_motions, device=self.device
-                )[:n_motions]
+                self.available_motion_ids = eligible[torch.randperm(len(eligible), device=self.device)[:n_motions]]
             else:
                 raise ValueError(
                     f"Unknown subset_method string: {subset_method}. Must be 'first', 'last', or 'random'"
@@ -164,6 +165,7 @@ class MotionManager:
             self.available_motion_ids = torch.tensor(
                 motion_ids, dtype=torch.long, device=self.device
             )
+            require_allowed_motion_ids(self.motion_lib, self.available_motion_ids)
         else:
             raise ValueError(
                 f"subset_method must be None, string, or list of integers, got {type(subset_method)}"
@@ -180,7 +182,7 @@ class MotionManager:
         Setup motion exclusion based on config.exclude_motions_file and/or config.exclude_motion_ids.
         If both are provided, combines them (union).
         """
-        excluded_set = set()
+        excluded_set = set(getattr(self.motion_lib, "excluded_motion_ids", torch.empty(0, dtype=torch.long)).cpu().tolist())
 
         if self.config.exclude_motions_file is not None:
             file_ids = self._load_exclusions_from_file(self.config.exclude_motions_file)
@@ -226,6 +228,7 @@ class MotionManager:
                 self.num_envs,
             ), f"fixed_motion_ids_per_env must be of shape ({self.num_envs},), got {fixed_motion_ids_per_env.shape}"
             self._env_has_fixed_motion = fixed_motion_ids_per_env != -1
+            require_allowed_motion_ids(self.motion_lib, fixed_motion_ids_per_env[self._env_has_fixed_motion])
             num_fixed = self._env_has_fixed_motion.sum().item()
             if num_fixed > 0:
                 print(f"Motion Manager: {num_fixed} environments have fixed motion IDs")
@@ -340,6 +343,8 @@ class MotionManager:
 
         # Apply exclusions before sampling
         self._apply_motion_exclusions()
+        if not bool((self.motion_weights > 0).any()):
+            raise ValueError("No sampleable motion remains after exclusions and length filtering")
         return torch.multinomial(self.motion_weights, num_samples=n, replacement=True)
 
     def sample_time(
@@ -354,6 +359,7 @@ class MotionManager:
         Returns:
             Sampled times [num_samples]
         """
+        require_allowed_motion_ids(self.motion_lib, motion_ids)
         phase = torch.rand(motion_ids.shape, device=self.device)
 
         max_time = self.motion_lib.motion_lengths[motion_ids].clone()
@@ -450,6 +456,8 @@ class MotionManager:
         state_dict = {
             "motion_file_name": self.motion_lib.motion_file,
             "motion_weights": self.motion_weights.cpu().clone(),
+            # Audit only: restore always enforces the current policy.
+            "motion_exclusion_report": getattr(self.motion_lib, "motion_exclusion_report", None),
         }
         return state_dict
 
@@ -464,3 +472,4 @@ class MotionManager:
                 self.motion_weights[:] = state_dict["motion_weights"].to(
                     self.motion_weights.device
                 )
+            self._apply_motion_exclusions()

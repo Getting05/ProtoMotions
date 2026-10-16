@@ -283,7 +283,8 @@ class GPCPriorEvaluator(BaseEvaluator):
             return {}, None, 0
         if self.config.validation_motion_file and self._validation_lib is None:
             self._validation_lib = MotionLib(
-                MotionLibConfig(motion_file=self.config.validation_motion_file), device=self.device)
+                MotionLibConfig(motion_file=self.config.validation_motion_file,
+                    motion_exclusion_files=getattr(getattr(self.agent.motion_lib,"config",None),"motion_exclusion_files",[])), device=self.device)
         libraries = {"train": self.agent.motion_lib}
         if self._validation_lib is not None:
             libraries["validation"] = self._validation_lib
@@ -301,10 +302,13 @@ class GPCPriorEvaluator(BaseEvaluator):
                                limitation="Exact source-path audit cannot detect renamed or duplicated clips")
         rank, world = self.fabric.global_rank, self.fabric.world_size
         cohorts = {}
+        from protomotions.components.motion_exclusions import allowed_motion_ids
         for split, lib in libraries.items():
             shared = split == "validation" or not lib.different_motion_files_across_ranks
-            cohorts[split] = select_motion_ids(lib.num_motions(), min(self.num_envs, self.config.num_eval_envs),
-                                               self.config.seed, rank, world, shared).to(self.device)
+            pool = allowed_motion_ids(lib, self.device)
+            selected = select_motion_ids(len(pool), min(self.num_envs, self.config.num_eval_envs),
+                                        self.config.seed, rank, world, shared).to(self.device)
+            cohorts[split] = pool[selected]
         n = min(len(ids) for ids in cohorts.values())
         global_n = int(self._sum(torch.tensor(n, device=self.device)))
         metrics, details, histograms = {}, {}, {}

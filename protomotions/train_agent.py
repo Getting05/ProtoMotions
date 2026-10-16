@@ -211,6 +211,10 @@ def create_parser():
     )
 
     add_video_arguments(parser)
+    parser.add_argument(
+        "--motion-exclusion-file", action="append", default=None,
+        help="Additional key-based exclusion JSON; repeatable. Repository exclusions always apply.",
+    )
 
     # Optional arguments
     parser.add_argument(
@@ -646,6 +650,7 @@ def main():
     prior_eval_options = explicit_prior_eval_options(args)
     physics_guard_override = args.physics_guard
     eval_num_motions_override = args.eval_num_motions
+    motion_exclusion_override = getattr(args, "motion_exclusion_file", None)
     if eval_num_motions_override is not None and eval_num_motions_override < 0:
         raise ValueError("--eval-num-motions must be non-negative")
     video_overrides = explicit_video_options(args)
@@ -796,6 +801,11 @@ def main():
         agent_config.physics_guard_enabled = physics_guard_override
         args.physics_guard = physics_guard_override
     apply_prior_eval_options(agent_config, prior_eval_options)
+    if motion_exclusion_override:
+        motion_lib_config.motion_exclusion_files = list(dict.fromkeys([
+            *getattr(motion_lib_config, "motion_exclusion_files", []), *motion_exclusion_override,
+        ]))
+        args.motion_exclusion_file = motion_exclusion_override
 
     # IsaacLab 3 uses xyzw quaternions. Old resolved configs may still carry
     # the IsaacLab 2 wxyz flag, including true resume checkpoints.

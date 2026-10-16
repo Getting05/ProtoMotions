@@ -656,7 +656,7 @@ def test_process_packaged_motion_file_uses_passed_pattern_and_passes_through_pla
 def test_motion_lib_initializes_shard_index_for_empty_and_unsharded(tmp_path):
     empty = MotionLib.empty(device="cpu")
     package_path = tmp_path / "package.pt"
-    torch.save(_motion_file_payload(2), package_path)
+    _populated_motion_lib().save_to_file(package_path)
     unsharded = MotionLib(MotionLibConfig(motion_file=str(package_path)), device="cpu")
 
     assert empty.motion_file_shard_index is None

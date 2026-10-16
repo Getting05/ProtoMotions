@@ -7,12 +7,16 @@ import torch
 from .extract_motion import MotionArchive
 from .geometry import sha256
 from .run import write_json
+from protomotions.components.motion_exclusions import MotionExclusions
 
 
-def pack(manifest,output,include_review=False):
+def pack(manifest,output,include_review=False,exclude_files=None):
     from protomotions.components.scene_lib import Scene, SceneLib, BoxSceneObject, ObjectOptions
     manifest=Path(manifest).resolve(); root=manifest.parent
     records=[json.loads(x) for x in manifest.read_text().splitlines() if x.strip()]
+    policy=MotionExclusions(exclude_files)
+    blocked=[r for r in records if policy.matches(r["motion_key"])]
+    records=[r for r in records if not policy.matches(r["motion_key"])]
     records=[r for r in records if r["training_eligible"] or (include_review and r["status"] == "needs_review")]
     if not records:
         raise ValueError("No eligible scenes; inspect validation reports. Refusing a silent flat-ground fallback")
@@ -29,6 +33,9 @@ def pack(manifest,output,include_review=False):
     packed_records=[]; counts=[]; dts=[]; keys=[]
     for new_id,r in enumerate(records):
         old_id=r["motion_local_id"]
+        if not 0 <= old_id < len(archive) or archive.keys[old_id] != r["motion_key"]:
+            raise ValueError(f"Source motion ID/key mismatch at {old_id}")
+        policy.require_allowed(archive.keys[old_id])
         start=int(archive.data["length_starts"][old_id]); count=int(archive.data["motion_num_frames"][old_id])
         for k in packed:
             value=archive.data[k][start:start+count].clone()
@@ -89,6 +96,7 @@ def pack(manifest,output,include_review=False):
              "motion_ids":list(range(len(records))),"source_motion_ids":[r["motion_local_id"] for r in records],"object_slots":slots,
              "includes_needs_review":include_review,"physics_validated":False,
              "ground_collider":"existing_simulator_terrain_z0",
+             "exclusion_policy_files":policy.files,"excluded_source_motion_ids":[r["motion_local_id"] for r in blocked],
              "padding_z_max":-100,"strict_motion_pairing":True}
     write_json(str(output)+".binding.json",binding)
     return binding
@@ -98,7 +106,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--manifest",required=True); p.add_argument("--output",required=True)
     p.add_argument("--include-needs-review",action="store_true",help="Inspection only; training loader rejects these by default")
-    args=p.parse_args(); print(json.dumps(pack(args.manifest,args.output,args.include_needs_review),indent=2))
+    p.add_argument("--exclude-file",action="append",default=[])
+    args=p.parse_args(); print(json.dumps(pack(args.manifest,args.output,args.include_needs_review,args.exclude_file),indent=2))
 
 
 if __name__=="__main__": main()

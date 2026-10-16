@@ -18,6 +18,7 @@ def main():
     p.add_argument("--limit-per-shard",type=int)
     p.add_argument("--support-frames",type=int,default=0)
     p.add_argument("--pack",action="store_true")
+    p.add_argument("--exclude-file",action="append",default=[])
     args=p.parse_args()
     if "slurmrank" not in Path(args.motion_pattern).name: p.error("Pattern filename must contain slurmrank")
     if args.workers<1:p.error("workers must be positive")
@@ -32,11 +33,13 @@ def main():
         command=[sys.executable,"-u","-m","scripts.whole_body_scene.run","--motion-file",str(paths[index]),
                  "--output",str(out),"--support-frames",str(args.support_frames)]
         if args.limit_per_shard is not None:command.extend(["--limit",str(args.limit_per_shard)])
+        exclusion_args=[value for path in args.exclude_file for value in ("--exclude-file",path)]
+        command.extend(exclusion_args)
         with open(root/f"shard_{index}.log","a") as log:
             subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True)
             if args.pack:
                 subprocess.run([sys.executable,"-m","scripts.whole_body_scene.pack","--manifest",str(out/"manifest.jsonl"),
-                                "--output",str(root/"packed"/f"scenes_{index}.pt")],stdout=log,stderr=subprocess.STDOUT,check=True)
+                                "--output",str(root/"packed"/f"scenes_{index}.pt"),*exclusion_args],stdout=log,stderr=subprocess.STDOUT,check=True)
         return index
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         for index in executor.map(run,shards):print(f"Completed shard {index}",flush=True)

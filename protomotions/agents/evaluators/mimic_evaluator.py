@@ -254,10 +254,14 @@ class MimicEvaluator(BaseEvaluator):
         if limit is not None and limit < 0:
             raise ValueError("eval_num_motions must be non-negative")
         fixed = fixed_motion_ids.numel() > 0
+        from protomotions.components.motion_exclusions import allowed_motion_ids, require_allowed_motion_ids
         motion_ids = (
             fixed_motion_ids if fixed else
-            torch.arange(self.motion_lib.num_motions(), device=self.device)
+            allowed_motion_ids(self.motion_lib, self.device)
         )
+        require_allowed_motion_ids(self.motion_lib, motion_ids)
+        if not motion_ids.numel():
+            raise ValueError("No eligible motions remain for evaluation")
         total = motion_ids.numel()
         if limit and limit < total:
             # Dedicated CPU RNG: independent of training's random draw stream,

@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-16",
+  "host": "atom8@172.16.9.7",
+  "branch": "codex/bones-p2-whole-body-scenes",
+  "checkout": "/data/chenguanting/ProtoMotions-wbc-scene",
+  "policy_files": [
+    {
+      "path": "/data/chenguanting/ProtoMotions-wbc-scene/protomotions/data/motion_exclusions.json",
+      "sha256": "93224bdabce6eaaf515247179c86fa979460dccef31d48053e48fbc9af391877"
+    }
+  ],
+  "full_corpus_audit": {
+    "files": 10,
+    "total_motions": 138592,
+    "excluded_motions": 4,
+    "validation_only": true
+  },
+  "tests": {
+    "passed": 139,
+    "failed": 0,
+    "command": "python -m pytest -q protomotions/tests/test_motion_exclusions.py scripts/whole_body_scene/test_pipeline.py protomotions/tests/test_motion_manager.py protomotions/tests/test_motion_lib_helpers.py protomotions/tests/test_mimic_evaluator_helpers.py protomotions/tests/test_gpc_prior_evaluator.py"
+  },
+  "runtime": {
+    "status": "passed",
+    "source": "/data/chenguanting/datasets/BONES-SEED/p2_motionlib_lze_contact_orin/bones_seed_validation_astro_p2.pt",
+    "total_motions": 6930,
+    "allowed_motions": 6926,
+    "excluded_motion_ids": [
+      4522,
+      4523,
+      4524,
+      4525
+    ],
+    "random_samples": 100000,
+    "excluded_sample_count": 0,
+    "old_checkpoint_weights_reblocked": true,
+    "explicit_query_rejected": true,
+    "forced_sampling_rejected": true,
+    "eligible_query_passed": true,
+    "cli_add_real_ids_verified": true,
+    "active_reconstruction_records": 10,
+    "removed_from_active_reconstruction": [
+      4522,
+      4524
+    ],
+    "original_motion_ids_preserved": true,
+    "source_motion_files_modified": false
+  },
+  "interfaces": {
+    "config_cli_persists_exclusions": true,
+    "repacked_binding_validated": true,
+    "source_motion_ids": [
+      1694
+    ]
+  },
+  "isaaclab_smoke": {
+    "status": "passed",
+    "simulator": "isaaclab",
+    "steps": 8,
+    "envs": 2,
+    "observation_shapes": {
+      "terrain": [
+        2,
+        256
+      ],
+      "max_coords_obs": [
+        2,
+        463
+      ],
+      "mimic_target_poses": [
+        2,
+        5208
+      ],
+      "whole_body_contact_plan": [
+        2,
+        651
+      ]
+    },
+    "reward_means": [
+      1.2583470344543457,
+      1.2120640277862549,
+      1.1452804803848267,
+      1.0754742622375488,
+      1.0162956714630127,
+      1.122685432434082,
+      1.0919618606567383,
+      1.0763628482818604
+    ],
+    "max_contact_force_n": 352.4919738769531,
+    "fsq_backward": true,
+    "checkpoint_roundtrip": true,
+    "subset_context": true,
+    "motion_ids": [
+      0,
+      0
+    ],
+    "scene_motion_ids": [
+      0,
+      0
+    ],
+    "tracking_success_evaluated": false,
+    "policy": "untrained_smoke"
+  },
+  "offline_explicit_requests": {
+    "requested": 4,
+    "selected": 0,
+    "excluded_requested_ids": [
+      4522,
+      4523,
+      4524,
+      4525
+    ],
+    "total_completed": 0,
+    "failures": [],
+    "statuses": {
+      "geometry_validated": 0,
+      "needs_review": 0,
+      "rejected": 0
+    },
+    "physical_execution_validated": false
+  },
+  "assets": {
+    "mjcf_sha256": "8fd5b8b969a52852519f998bd91699de7cd4b2b43f9d8c9b6b069e60bcb7d906",
+    "asset_root": "/data/chenguanting/ProtoMotions-wbc-scene/results/wbc_assets",
+    "note": "Main checkout MJCF changed independently during work; matching branch MJCF snapshot used with existing visual meshes."
+  },
+  "existing_training": "8 original ranks left running; no new training launched",
+  "activation": "All new processes loading this branch; repository policy automatically applies with frozen old configurations. Original data and diagnostic history retained."
+}

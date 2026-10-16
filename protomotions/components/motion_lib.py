@@ -153,6 +153,10 @@ class MotionLibConfig:
     """Configuration for motion library."""
 
     _target_: str = "protomotions.components.motion_lib.MotionLib"
+    motion_exclusion_files: List[str] = dataclass_field(
+        default_factory=list,
+        metadata={"help": "Additional key-based exclusion JSON files; repository exclusions always apply."},
+    )
     motion_file: Optional[str] = dataclass_field(
         default=None,
         metadata={
@@ -333,6 +337,8 @@ class MotionLib:
                 "Loading motions from yaml/npy file or Directory of motions which is slower"
             )
             self._load_motions(motion_file)
+            from protomotions.components.motion_exclusions import apply_motion_exclusions
+            apply_motion_exclusions(self)
 
         self.motion_file = motion_file
 
@@ -358,6 +364,9 @@ class MotionLib:
         self.motion_files = ()
         self.lrs = None
         self.goal_states = None
+        self.has_motion_exclusions = False
+        self.excluded_motion_ids = torch.empty(0, dtype=torch.long, device=self.device)
+        self.motion_excluded_mask = torch.empty(0, dtype=torch.bool, device=self.device)
 
     @classmethod
     def empty(cls, device: str = "cpu"):
@@ -633,6 +642,8 @@ class MotionLib:
         """
 
         # Get global indices by adding offsets
+        from protomotions.components.motion_exclusions import require_allowed_motion_ids
+        require_allowed_motion_ids(self, motion_ids)
         fl = frame_indices + self.length_starts[motion_ids]
 
         # Create a dict with keys from motion_field_mapping values
@@ -884,6 +895,9 @@ class MotionLib:
                 "Discarding contacts — any component reading ref contacts will error."
             )
             self.contacts = None
+
+        from protomotions.components.motion_exclusions import apply_motion_exclusions
+        apply_motion_exclusions(self)
 
     def smooth_contacts(self, window_size: int):
         """

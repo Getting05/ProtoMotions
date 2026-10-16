@@ -8,6 +8,7 @@ import hashlib
 import json
 import numpy as np
 import torch
+from protomotions.components.motion_exclusions import MotionExclusions
 
 
 def file_sha256(path):
@@ -33,8 +34,10 @@ def validate_binding(scene_file,motion_lib,asset_file=None,allow_review=False):
         raise ValueError("Invalid paired motion IDs")
     records={r["motion_local_id"]:r for r in
              (json.loads(x) for x in Path(binding["manifest"]).read_text().splitlines() if x.strip())}
+    policy=MotionExclusions(getattr(getattr(motion_lib,"config",None),"motion_exclusion_files",None))
     for i in ids:
         r=records[i]
+        policy.require_allowed(r["motion_key"])
         if r["motion_key"]!=motion_lib.motion_files[i] or r["num_frames"]!=int(motion_lib.motion_num_frames[i]):
             raise ValueError(f"Motion ID/key/frame-count mismatch at {i}")
         if not np.isclose(r["dt"],float(motion_lib.motion_dt[i]),rtol=1e-6,atol=1e-9):

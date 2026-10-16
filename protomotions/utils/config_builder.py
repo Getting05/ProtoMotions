@@ -53,6 +53,11 @@ def build_standard_configs(
     motion_lib_cfg = motion_lib_config_fn(
         args
     )  # Must return MotionLibConfig (motion_file can be None)
+    extra_exclusions = getattr(args, "motion_exclusion_file", None)
+    if extra_exclusions:
+        motion_lib_cfg.motion_exclusion_files = list(dict.fromkeys([
+            *getattr(motion_lib_cfg, "motion_exclusion_files", []), *extra_exclusions,
+        ]))
 
     # Build env config (depends on robot_config)
     env_cfg = env_config_fn(robot_cfg, args)

@@ -18,6 +18,7 @@ from .extract_motion import MotionArchive
 from .contacts import InferenceConfig, detect_static, detect_dynamic
 from .reconstruct import reconstruct_static, interaction_graph
 from .validation import validate_geometry, build_labels, validate_support
+from protomotions.components.motion_exclusions import MotionExclusions
 
 
 def write_json(path,data):
@@ -27,7 +28,8 @@ def write_json(path,data):
     tmp.replace(path)
 
 
-def process_one(archive,collision,index,output,cfg,source_hash,config_hash,support_frames):
+def process_one(archive,collision,index,output,cfg,source_hash,config_hash,support_frames,exclusions=None):
+    (exclusions or MotionExclusions()).require_allowed(archive.keys[index])
     start=time.monotonic(); motion=archive.get(index)
     digest=motion.digest()
     token=f"{index:06d}_{digest[:12]}"
@@ -118,6 +120,7 @@ def main():
     p.add_argument("--samples-per-geom",type=int,default=24)
     p.add_argument("--support-frames",type=int,default=32,help="0 checks all frames")
     p.add_argument("--config",help="JSON overrides of InferenceConfig")
+    p.add_argument("--exclude-file",action="append",default=[],help="Additional key-based exclusions; repository policy always applies")
     args=p.parse_args()
     if args.stride<1 or args.offset<0 or args.samples_per_geom<4 or args.support_frames<0:
         p.error("Invalid stride, offset, sample count or support frame count")
@@ -133,6 +136,10 @@ def main():
     with open(output/".writer.lock","w") as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         archive=MotionArchive(args.motion_file)
+        exclusions=MotionExclusions(args.exclude_file)
+        _,excluded=exclusions.partition(archive.keys)
+        excluded_ids={e["motion_local_id"] for e in excluded}
+        write_json(output/"exclusion_audit.json",{"policy_files":exclusions.files,"excluded":excluded})
         collision=CollisionModel(args.model,cfg.samples_per_geom,cfg.seed)
         signature={"inference":cfg.to_dict(),"support_frames":args.support_frames,
                    "asset_sha256":collision.asset_sha256,"schema_version":1,
@@ -149,19 +156,23 @@ def main():
         if args.match: ids=[i for i in ids if args.match.lower() in archive.keys[i].lower()]
         if args.limit is not None: ids=ids[:args.limit]
         if not ids: raise ValueError("No motions selected")
+        requested_ids=ids
+        ids=[i for i in ids if i not in excluded_ids]
         failures=[]
         for index in ids:
             try:
-                record=process_one(archive,collision,index,output,cfg,source_hash,config_hash,args.support_frames)
+                record=process_one(archive,collision,index,output,cfg,source_hash,config_hash,args.support_frames,exclusions)
                 print(json.dumps({"id":index,"status":record["status"],"reasons":record["reasons"]}),flush=True)
             except Exception as e:
                 failure={"id":index,"error":str(e),"traceback":traceback.format_exc()}
                 failures.append(failure); write_json(output/"failures"/f"{index:06d}.json",failure)
                 print(json.dumps({"id":index,"error":str(e)}),flush=True)
         records=[json.loads(x.read_text()) for x in sorted((output/"records").glob("*.json"))] if (output/"records").exists() else []
+        records=[r for r in records if not exclusions.matches(r["motion_key"])]
         tmp=output/"manifest.jsonl.tmp"
         tmp.write_text("".join(json.dumps(r,ensure_ascii=False)+"\n" for r in records)); tmp.replace(output/"manifest.jsonl")
-        summary={"selected":len(ids),"total_completed":len(records),"failures":failures,
+        summary={"requested":len(requested_ids),"selected":len(ids),"excluded_requested_ids":[i for i in requested_ids if i in excluded_ids],
+                 "total_completed":len(records),"failures":failures,
                  "statuses":{s:sum(r["status"]==s for r in records) for s in ("geometry_validated","needs_review","rejected")},
                  "physical_execution_validated":False}
         write_json(output/"summary.json",summary); print(json.dumps(summary),flush=True)
