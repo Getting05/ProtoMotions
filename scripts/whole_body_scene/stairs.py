@@ -20,7 +20,7 @@ def support_windows(events, body_id, frames, dt):
         counts[e["start"]:e["end"]] += 1
     if not counts.max():
         return []
-    # Consensus may be shorter than the individual >=120 ms surface events.
+    # Aggregate sample events after the configurable per-event dwell filter.
     return [(int(a), int(z)) for a, z in runs(counts >= max(3, counts.max() * .25))
             if (z - a) * dt >= .08]
 

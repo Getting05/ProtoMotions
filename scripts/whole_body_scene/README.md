@@ -128,10 +128,38 @@ the generic full-body fitter. It checks source-motion, scene and model identity
 before rendering and displays the quality status. It is kinematic replay, not
 a policy rollout. A visually plausible staircase can remain `needs_review`.
 
-On the four inspected source motions, train-7/9977, train-1/9963 and train-5/9985
-retain eight treads each. Train-0/9969 has only three supported levels and is a
-partial reconstruction. All four remain outside the eligible training set due
-to support residuals, with additional reference self-collision on 9963/9969.
+The default minimum individual contact event duration is now **0.08 seconds**
+(three frames at this dataset's approximately 30 Hz), with an explicit profile
+in `configs/stairs_duration008.json`. The separate 0.22-second dwell for slow
+pelvis/waist/knee support and the existing consensus and geometry thresholds
+remain unchanged. Pass the profile with
+`--config scripts/whole_body_scene/configs/stairs_duration008.json`.
+
+The initial 0.12-second run retained eight treads each for train-7/9977,
+train-1/9963 and train-5/9985, but only three for train-0/9969. The complete
+0.08-second rerun and four additional non-mirrored ascending motions give:
+
+| Source shard / local ID | Cohort | Treads at 0.12 s | Treads at 0.08 s |
+| --- | --- | ---: | ---: |
+| train7 / 9977 | original walk | 8 | 8 |
+| train1 / 9963 | original walk | 8 | 8 |
+| train5 / 9985 | original jog | 8 | 8 |
+| train0 / 9969 | original jog | 3 | 9 |
+| train1 / 9962 | additional jog | 3 | 6 |
+| train5 / 9986 | additional jog | 4 | 7 |
+| train7 / 9979 | additional walk | 7 | 7 |
+| train2 / 9961 | additional walk | 7 | 8 |
+
+All 1,088 reference frames were checked for geometry and support forces. Only
+train7/9979 passes the current offline eligibility thresholds; the other seven
+remain `needs_review`. No new training or closed-loop controller evaluation was
+started. Shorter dwell also affects non-foot candidates: additional generic
+contact hypotheses are visible in amber and require review. More detected
+treads does not establish better force feasibility or correct auxiliary geometry.
+The two additional jogs still contain gaps in their recovered stair profiles.
+`DURATION008_VALIDATION.json` records the complete comparison and video hashes.
+Output on machine 2 is
+`/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/stairs_duration008_20261016`.
 
 ## Persistent motion exclusions
 

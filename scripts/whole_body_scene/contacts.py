@@ -13,7 +13,7 @@ class InferenceConfig:
     speed_enter: float = 0.10
     speed_exit: float = 0.22
     normal_speed_enter: float = 0.055
-    min_duration_s: float = 0.12
+    min_duration_s: float = 0.08
     deceleration: float = 0.65
     min_approach_speed: float = 0.08
     penetration_tolerance: float = 0.008
