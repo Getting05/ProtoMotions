@@ -25,7 +25,7 @@ COLORS = [(47, 164, 157), (66, 117, 180)]
 
 
 def object_color(obj, index):
-    return COLORS[index % 2] if obj["kind"] == "stair_tread" else (218, 159, 63)
+    return COLORS[index % 2] if obj["kind"] in ("stair_tread", "ladder_rung") else (218, 159, 63)
 
 
 def vertices(box):
@@ -156,6 +156,8 @@ def render(record, root, output, model_path, title):
     option.geomgroup[:] = 0
     option.geomgroup[[0, 1, 2]] = 1
     stairs = [o for o in scene["objects"] if o["kind"] == "stair_tread"]
+    count=sum(o["kind"] != "ground" for o in scene["objects"])
+    family=scene.get("scene_inference",{}).get("structural_family","stairs" if stairs else "generic")
     kept_ids = {str(o["object_id"]) for o in scene["objects"]}
     penetration = max([v for k, v in quality["geometry"]["max_penetration_m_by_object"].items()
                        if k in kept_ids] + [0.])
@@ -176,17 +178,19 @@ def render(record, root, output, model_path, title):
                 frame.paste(Image.fromarray(renderer.render()), (0, 92))
                 d = ImageDraw.Draw(frame)
                 d.text((18, 10), f"P2 + RECONSTRUCTED TERRAIN | {title} | motion {motion.local_id}", font=font, fill="white")
-                d.text((18, 39), f"{record['status']} | {len(stairs)} retained treads | t={t * motion.dt:.2f}s / {(n - 1) * motion.dt:.2f}s", font=font, fill=(247, 195, 94))
+                d.text((18, 39), f"{record['status']} | {family}: {count} objects | t={t * motion.dt:.2f}s / {(n - 1) * motion.dt:.2f}s", font=font, fill=(247, 195, 94))
                 d.text((18, 65), Path(motion.key).name, font=small, fill=(184, 197, 213))
                 pose = project(motion.pos[t])
                 for b, parent in enumerate(parents):
                     if parent >= 0:
                         d.line([xy(pose[b]), xy(pose[parent])], fill=(65, 73, 88), width=2)
+                    if states[t,b]==1:
+                        x,y=xy(pose[b]);d.ellipse((x-3,y-3,x+3,y+3),fill=(30,155,80))
                 for path, body, color in zip(foot_paths, foot_ids, foot_colors):
                     x, y = xy(project(path[t]))
                     d.ellipse((x - 5, y - 5, x + 5, y + 5), fill=color if states[t, body] == 1 else "white", outline=color, width=2)
                 d.text((18, 748), f"Retained geometry: max penetration {penetration * 1000:.1f} mm | support force residual p95 {quality['support']['force_residual_p95_over_weight']:.2f} body weights", font=small, fill=(196, 207, 222))
-                d.text((18, 774), "Teal/blue: inferred treads | amber: other contact hypotheses | kinematic replay, not a controller rollout", font=small, fill=(150, 168, 187))
+                d.text((18, 774), "Blue: steps/rungs | amber: support hypotheses | green dots: contact links | kinematic replay", font=small, fill=(150, 168, 187))
                 writer.append_data(np.asarray(frame))
                 if t in (0, n // 2, n - 1):
                     frame.save(output.with_name(output.stem + f"_frame{t:04d}.png"))
@@ -198,6 +202,7 @@ def render(record, root, output, model_path, title):
     metadata = {"motion_id": motion.local_id, "source_key": motion.key, "source_motion_file": str(archive.path),
                 "scene_file": str(scene_path), "scene_sha256": sha256(scene_path), "asset_sha256": sha256(model_path),
                 "frames": n, "fps": 1 / motion.dt, "fk_max_error_m": error, "retained_treads": len(stairs),
+                "retained_objects":count,"structural_family":family,
                 "status": record["status"], "reasons": record["reasons"], "max_retained_penetration_m": penetration,
                 "reference_pose_modified": False, "scene_origin_offset": record["scene_origin_offset"],
                 "rendering": "kinematic reference with retained reconstruction; no controller or dynamics rollout",

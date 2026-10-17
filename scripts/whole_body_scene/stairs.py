@@ -51,7 +51,7 @@ def safe_riser(points_local, height, lateral_lo, lateral_hi, tolerance):
     return float(below[:, 0].max()) + .008
 
 
-def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
+def reconstruct_stairs(scene, events, points, normals, model, motion, cfg, support_intervals=None):
     names = model.body_names
     feet = [names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")
             if n in names]
@@ -80,7 +80,8 @@ def reconstruct_stairs(scene, events, points, normals, model, motion, cfg):
     for body in feet:
         mask = model.surface.body == body
         foot = local[:, mask]
-        for a, z in support_windows(events, body, len(points), motion.dt):
+        windows = support_windows(events, body, len(points), motion.dt) if support_intervals is None else support_intervals.get(body, [])
+        for a, z in windows:
             original_height = float(np.quantile(foot[a:z, :, 2].min(axis=1), .1)) - .002
             if original_height <= .04:
                 continue

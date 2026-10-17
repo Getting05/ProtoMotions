@@ -367,3 +367,12 @@ The implementation is original code guided by the supplied WBC-SR design:
 [SceneBot](https://arxiv.org/abs/2606.27581), and
 [TERRA](https://github.com/amathislab/terra). These references are not a claim
 that this implementation reproduces their benchmark results.
+
+## V2 whole-body reconstruction
+
+The new profile `configs/whole_body_v2.json` enables deterministic symmetric
+sampling, temporal plane hypotheses, rolling sole patches, connected solid
+fitting, articulated support-cost selection and scene-conditioned contact
+re-estimation. It removes automatic thin-column completion from this path.
+See [V2_DESIGN.md](V2_DESIGN.md) for the algorithm, commands, priors and limits.
+Legacy modes and the persistent exclusion policy remain available.

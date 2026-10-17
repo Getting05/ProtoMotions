@@ -28,6 +28,12 @@ def write_json(path,data):
     tmp.replace(path)
 
 
+def algorithm_sha256():
+    names=("geometry.py","extract_motion.py","contacts.py","reconstruct.py","stairs.py","validation.py","run.py",
+           "sampling_v2.py","planes_v2.py","wrench_v2.py","scene_v2.py")
+    return hashlib.sha256("".join(sha256(Path(__file__).parent/name) for name in names).encode()).hexdigest()
+
+
 def process_one(archive,collision,index,output,cfg,source_hash,config_hash,support_frames,exclusions=None):
     (exclusions or MotionExclusions()).require_allowed(archive.keys[index])
     start=time.monotonic(); motion=archive.get(index)
@@ -52,15 +58,37 @@ def process_one(archive,collision,index,output,cfg,source_hash,config_hash,suppo
     origin_offset=collision.floor_offset(motion,rotations,cfg.penetration_tolerance)
     motion.pos+=origin_offset
     points+=origin_offset
-    events,candidate_metrics=detect_static(collision,motion,points,normals,rotations,cfg)
-    print(f"motion {index}: {len(events)} contact candidates; fitting geometry",flush=True)
     dynamic=detect_dynamic(collision,motion,cfg)
-    scene=reconstruct_static(events,points,collision,cfg)
-    if cfg.static_scene_mode == "stairs":
-        from .stairs import reconstruct_stairs
-        scene = reconstruct_stairs(scene, events, points, normals, collision, motion, cfg)
+    if cfg.static_scene_mode == "v2":
+        from .scene_v2 import reconstruct_v2,events_from_scene
+        scene,plane_groups=reconstruct_v2(collision,motion,points,normals,cfg)
+        events=[]
+        candidate_metrics={"candidate_planes":len(plane_groups),"candidate_events":0,
+                           "candidate_bodies":collision.collision_bodies.tolist(),
+                           "scores_are_calibrated_probabilities":False}
+    else:
+        events,candidate_metrics=detect_static(collision,motion,points,normals,rotations,cfg)
+        print(f"motion {index}: {len(events)} contact candidates; fitting geometry",flush=True)
+        scene=reconstruct_static(events,points,collision,cfg)
+        if cfg.static_scene_mode == "stairs":
+            from .stairs import reconstruct_stairs
+            scene = reconstruct_stairs(scene, events, points, normals, collision, motion, cfg)
     print(f"motion {index}: {len(scene['objects'])} objects; exact collision replay",flush=True)
     geometry=validate_geometry(collision,motion,scene,events,cfg)
+    if cfg.static_scene_mode == "v2":
+        events=events_from_scene(scene,collision,motion,points,normals)
+        selected={o.get("candidate_id") for o in scene["objects"]}
+        for group in plane_groups:
+            if group["candidate_id"] in selected:continue
+            for patch in group["patches"]:
+                b=patch["body_id"]
+                events.append({"event_id":len(events),"body_id":b,
+                    "sample_id":int(np.flatnonzero(collision.surface.body==b)[0]),
+                    "start":patch["start"],"end":patch["end"],"point":patch["center"],
+                    "normal":patch["normal"],"confidence":0.,"contact_type":1,"status":"unknown","object_id":-1,
+                    "reason":"unselected_or_unvalidated_plane_hypothesis",
+                    "evidence":{"candidate_id":group["candidate_id"],"area_m2":patch["area_m2"]}})
+        candidate_metrics["candidate_events"]=len(events)
     if "stairs_inference" in scene:
         retained = {o["object_id"] for o in scene["objects"]}
         scene["stairs_inference"]["retained_object_ids"] = [
@@ -86,6 +114,13 @@ def process_one(archive,collision,index,output,cfg,source_hash,config_hash,suppo
     if support["joint_residual_p95_over_limit"] > .2: reasons.append("large_joint_torque_residual")
     if support["solver_failures"]: reasons.append("support_solver_did_not_converge")
     if geometry["self_collision_frames"]: reasons.append("reference_self_collision")
+    if cfg.static_scene_mode == "v2":
+        family=scene["scene_inference"]["structural_family"]
+        if scene["scene_inference"].get("ladder_hypothesis") not in (None,"supported"):
+            reasons.append("coherent_ladder_hypothesis_unresolved")
+        expected_kind={"stairs":"stair_tread","ladder":"ladder_rung"}.get(family)
+        if expected_kind and sum(o["kind"]==expected_kind for o in scene["objects"])<3:
+            reasons.append("insufficient_validated_structural_levels")
     status="geometry_validated" if geometry["ground_pass"] and scene["objects"] else "rejected"
     if status != "rejected" and reasons: status="needs_review"
     quality={"status":status,"reasons":reasons,"fk_max_error_m":fk,"candidate_inference":candidate_metrics,
@@ -129,7 +164,7 @@ def main():
     p.add_argument("--samples-per-geom",type=int,default=24)
     p.add_argument("--support-frames",type=int,default=32,help="0 checks all frames")
     p.add_argument("--config",help="JSON overrides of InferenceConfig")
-    p.add_argument("--static-scene-mode", choices=["generic", "stairs"], default=None,
+    p.add_argument("--static-scene-mode", choices=["generic", "stairs", "v2"], default=None,
                    help="Optional explicit horizontal staircase structural prior")
     p.add_argument("--exclude-file",action="append",default=[],help="Additional key-based exclusions; repository policy always applies")
     args=p.parse_args()
@@ -143,7 +178,7 @@ def main():
             setattr(cfg,k,v)
     if args.static_scene_mode is not None:
         cfg.static_scene_mode = args.static_scene_mode
-    if cfg.static_scene_mode not in ("generic", "stairs"):
+    if cfg.static_scene_mode not in ("generic", "stairs", "v2"):
         raise ValueError("Unknown static_scene_mode")
     output=Path(args.output).resolve(); output.mkdir(parents=True,exist_ok=True)
     # Output lock prevents simultaneous manifest writers/resume corruption.
@@ -155,11 +190,11 @@ def main():
         _,excluded=exclusions.partition(archive.keys)
         excluded_ids={e["motion_local_id"] for e in excluded}
         write_json(output/"exclusion_audit.json",{"policy_files":exclusions.files,"excluded":excluded})
-        collision=CollisionModel(args.model,cfg.samples_per_geom,cfg.seed)
+        collision=CollisionModel(args.model,cfg.samples_per_geom,cfg.seed,
+                                 sampling="symmetric" if cfg.static_scene_mode=="v2" else "random")
         signature={"inference":cfg.to_dict(),"support_frames":args.support_frames,
                    "asset_sha256":collision.asset_sha256,"schema_version":1,
-                   "algorithm_sha256":hashlib.sha256("".join(sha256(Path(__file__).parent/name) for name in
-                       ("geometry.py","extract_motion.py","contacts.py","reconstruct.py","stairs.py","validation.py","run.py")).encode()).hexdigest()}
+                   "algorithm_sha256":algorithm_sha256()}
         config_hash=hashlib.sha256(json.dumps(signature,sort_keys=True).encode()).hexdigest()
         source_hash=sha256(archive.path)
         signature.update(config_sha256=config_hash,motion_file_sha256=source_hash,motion_shard=str(archive.path))

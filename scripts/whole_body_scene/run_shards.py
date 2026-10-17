@@ -17,7 +17,8 @@ def main():
     p.add_argument("--workers",type=int,default=1)
     p.add_argument("--limit-per-shard",type=int)
     p.add_argument("--support-frames",type=int,default=0)
-    p.add_argument("--static-scene-mode", choices=["generic", "stairs"], default="generic")
+    p.add_argument("--static-scene-mode", choices=["generic", "stairs", "v2"], default=None)
+    p.add_argument("--config",help="Inference JSON, including v2 sampling resolution")
     p.add_argument("--pack",action="store_true")
     p.add_argument("--exclude-file",action="append",default=[])
     args=p.parse_args()
@@ -32,9 +33,10 @@ def main():
     def run(index):
         out=root/f"shard_{index}"
         command=[sys.executable,"-u","-m","scripts.whole_body_scene.run","--motion-file",str(paths[index]),
-                 "--output",str(out),"--support-frames",str(args.support_frames),
-                 "--static-scene-mode",args.static_scene_mode]
+                 "--output",str(out),"--support-frames",str(args.support_frames)]
+        if args.static_scene_mode is not None:command.extend(["--static-scene-mode",args.static_scene_mode])
         if args.limit_per_shard is not None:command.extend(["--limit",str(args.limit_per_shard)])
+        if args.config:command.extend(["--config",args.config])
         exclusion_args=[value for path in args.exclude_file for value in ("--exclude-file",path)]
         command.extend(exclusion_args)
         with open(root/f"shard_{index}.log","a") as log:

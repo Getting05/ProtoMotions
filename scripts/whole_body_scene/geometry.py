@@ -97,8 +97,11 @@ class Surface:
 
 
 class CollisionModel:
-    def __init__(self, path, samples_per_geom=24, seed=20261016):
+    def __init__(self, path, samples_per_geom=24, seed=20261016, sampling="random"):
         self.path = Path(path).resolve()
+        if sampling not in ("random", "symmetric"):
+            raise ValueError(f"Unknown collision sampling scheme: {sampling}")
+        self.sampling = sampling
         self.asset_sha256 = sha256(path)
         tree = ET.parse(path)
         root = tree.getroot()
@@ -129,7 +132,11 @@ class CollisionModel:
         rng = np.random.default_rng(seed)
         points, normals, bodies, geoms = [], [], [], []
         for g in self.geom_ids:
-            p, n = primitive_samples(m.geom_type[g], m.geom_size[g], samples_per_geom, rng)
+            if sampling == "symmetric":
+                from .sampling_v2 import primitive_samples_deterministic
+                p, n = primitive_samples_deterministic(m.geom_type[g], m.geom_size[g], samples_per_geom)
+            else:
+                p, n = primitive_samples(m.geom_type[g], m.geom_size[g], samples_per_geom, rng)
             rot = Rotation.from_quat(m.geom_quat[g][[1, 2, 3, 0]]).as_matrix()
             p = p@rot.T + m.geom_pos[g]
             n = n@rot.T
@@ -225,4 +232,5 @@ class CollisionModel:
                 "collision_body_names": [self.body_names[i] for i in self.collision_bodies],
                 "non_collision_body_names": [n for i,n in enumerate(self.body_names) if i not in self.collision_bodies],
                 "collision_geometries": len(self.geom_ids), "surface_samples": len(self.surface.points),
+                "sampling_scheme": self.sampling,
                 "samples_by_body": {n: int((self.surface.body == i).sum()) for i,n in enumerate(self.body_names)}}

@@ -1,0 +1,5 @@
+{
+  "static_scene_mode": "v2",
+  "samples_per_geom": 96,
+  "min_duration_s": 0.08
+}
