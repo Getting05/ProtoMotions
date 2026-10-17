@@ -1,0 +1,177 @@
+{
+  "code_commit": "087d8d3ba5d6766f02b71c0ccda5999cd6d33bba",
+  "branch": "codex/bones-p2-whole-body-scenes",
+  "algorithm_sha256": "5b375f479a4208284fec8730cedcce337ba0b3d64685436961f384e86010aa60",
+  "asset_sha256": "8fd5b8b969a52852519f998bd91699de7cd4b2b43f9d8c9b6b069e60bcb7d906",
+  "summary": {
+    "clips": 33,
+    "frames": 4677,
+    "all_videos_fully_decoded": true,
+    "before_status": {
+      "needs_review": 30,
+      "geometry_validated": 3
+    },
+    "after_status": {
+      "needs_review": 28,
+      "geometry_validated": 5
+    },
+    "before_bad_force_frames": 714,
+    "after_bad_force_frames": 492,
+    "before_zero_contact_frames": 843,
+    "after_zero_contact_frames": 524,
+    "before_thin_columns": 92,
+    "after_thin_columns": 0,
+    "max_retained_penetration_mm": 7.3488616643252636,
+    "upstairs_before_treads": 193,
+    "upstairs_after_treads": 198,
+    "validation": "all recorded frames, exact geometry and bounded inverse dynamics",
+    "training_started": false,
+    "controller_rollout_performed": true,
+    "ground_truth_geometry_available": false,
+    "selection_is_development_cohort": true,
+    "baseline_note": "Stairs use prior full-cohort 24-sample baseline; non-stairs use prior 96-sample baseline. V2 uses deterministic resolution 96; this is a pipeline comparison, not a controlled density ablation.",
+    "controller_rollout_scope": "Untrained Stage 1 integration smoke only: 2 environments, 8 physics steps. No tracking evaluation.",
+    "tracking_quality_evaluated": false
+  },
+  "tests": {
+    "passed": 194,
+    "deselected": 1,
+    "deselected_reason": "needs_lfs: unrelated SceneLib main-example mesh assets are LFS pointers; actual frozen P2 geometry and render assets exercised separately"
+  },
+  "interface": {
+    "status": "passed",
+    "eligible_source_ids": [
+      232,
+      12057
+    ],
+    "inspection_source_ids": [
+      263,
+      342,
+      9953,
+      232,
+      2053,
+      10029,
+      5061,
+      9493,
+      12057,
+      9969,
+      9970,
+      9971,
+      9972
+    ],
+    "review_rejected_by_default": true,
+    "query_count": 6,
+    "query_shape": [
+      6,
+      31
+    ],
+    "observation_shape": [
+      6,
+      93
+    ],
+    "all_inspection_contact_shapes": {
+      "state": [
+        2015,
+        31
+      ],
+      "confidence": [
+        2015,
+        31
+      ],
+      "local_points": [
+        2015,
+        31,
+        4,
+        3
+      ],
+      "target_points": [
+        2015,
+        31,
+        4,
+        3
+      ],
+      "patch_weight": [
+        2015,
+        31,
+        4
+      ]
+    },
+    "pairing_hashes_checked": true,
+    "exclusions_checked": true,
+    "training_started": false,
+    "simulator_rollout_run": false
+  },
+  "stairs_interface": {
+    "status": "passed",
+    "source_ids": [
+      9961
+    ],
+    "scene_motion_ids": [
+      0,
+      0
+    ],
+    "real_stair_boxes": 8,
+    "contact_shape": [
+      2,
+      31
+    ],
+    "binding_hashes_checked": true,
+    "physics_rollout_run": false
+  },
+  "stage1_smoke": {
+    "status": "passed",
+    "simulator": "isaaclab",
+    "steps": 8,
+    "envs": 2,
+    "observation_shapes": {
+      "terrain": [
+        2,
+        256
+      ],
+      "max_coords_obs": [
+        2,
+        463
+      ],
+      "mimic_target_poses": [
+        2,
+        5208
+      ],
+      "whole_body_contact_plan": [
+        2,
+        651
+      ]
+    },
+    "reward_means": [
+      1.2655391693115234,
+      1.223365306854248,
+      1.1518192291259766,
+      1.0728408098220825,
+      0.9931579828262329,
+      1.0715627670288086,
+      1.0228652954101562,
+      0.9875404238700867
+    ],
+    "max_contact_force_n": 422.9842224121094,
+    "fsq_backward": true,
+    "checkpoint_roundtrip": true,
+    "subset_context": true,
+    "motion_ids": [
+      0,
+      0
+    ],
+    "scene_motion_ids": [
+      0,
+      0
+    ],
+    "tracking_success_evaluated": false,
+    "policy": "untrained_smoke"
+  },
+  "remote_results": "/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/v2_20261018_final",
+  "caveats": [
+    "No ground-truth geometry or held-out accuracy",
+    "28/33 records remain needs_review",
+    "Ladder and wall reconstruction unresolved",
+    "4 auxiliary walls remain in upstairs scenes",
+    "No GPC training started"
+  ]
+}

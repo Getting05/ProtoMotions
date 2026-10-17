@@ -376,3 +376,19 @@ fitting, articulated support-cost selection and scene-conditioned contact
 re-estimation. It removes automatic thin-column completion from this path.
 See [V2_DESIGN.md](V2_DESIGN.md) for the algorithm, commands, priors and limits.
 Legacy modes and the persistent exclusion policy remain available.
+
+The v2 development cohort checks all 4,677 frames in 33 motions (24 upstairs and
+nine other examples). Treads total 198 versus 193 in the earlier full-stair
+baseline; the 9982/9976 mirror pair both retain eight levels and 9969 retains
+nine. Automatic thin columns are absent. Five records pass the offline gates;
+28 remain `needs_review`, including unresolved ladder/obstacle cases and
+self-colliding references. Four auxiliary wall hypotheses remain in upstairs
+scenes. This is not ground-truth reconstruction accuracy. The old stair baseline
+uses 24 random samples, the generic baseline 96; v2 uses symmetric resolution 96.
+
+`V2_VALIDATION.json` records 194 passing tests (one unrelated LFS asset test was
+excluded), real MotionLib/SceneLib/contact binding checks, default rejection of
+review bundles, and an Isaac Lab smoke on the new eight-tread scene: two
+environments, eight physics steps, FSQ backward and checkpoint roundtrip.
+No GPC training or tracking-quality evaluation was started. Machine-2 artifacts:
+`/data/chenguanting/datasets/BONES-SEED/whole_body_scenes/v2_20261018_final`.
