@@ -435,6 +435,9 @@ class SteeringContext:
     tar_speed: Tensor = FieldPath()
     tar_face_dir: Tensor = FieldPath()
     prev_root_pos: Tensor = FieldPath()
+    reward_tar_dir: Tensor = FieldPath()
+    reward_tar_speed: Tensor = FieldPath()
+    reward_tar_face_dir: Tensor = FieldPath()
 
     def __init__(
         self,
@@ -443,6 +446,9 @@ class SteeringContext:
         tar_speed: Tensor,
         tar_face_dir: Tensor,
         prev_root_pos: Tensor,
+        reward_tar_dir: Optional[Tensor] = None,
+        reward_tar_speed: Optional[Tensor] = None,
+        reward_tar_face_dir: Optional[Tensor] = None,
     ):
         """Initialize SteeringContext.
 
@@ -452,12 +458,22 @@ class SteeringContext:
             tar_speed: Target movement speed [num_envs].
             tar_face_dir: Target facing direction in world frame [num_envs, 2] (xy only).
             prev_root_pos: Previous root position for velocity computation [num_envs, 3].
+            reward_tar_dir: Movement direction used by the completed action.
+            reward_tar_speed: Speed used by the completed action.
+            reward_tar_face_dir: Facing direction used by the completed action.
         """
         self.tar_dir = tar_dir
         self.tar_dir_theta = tar_dir_theta
         self.tar_speed = tar_speed
         self.tar_face_dir = tar_face_dir
         self.prev_root_pos = prev_root_pos
+        # Optional fallbacks preserve callers constructing a context directly.
+        # SteeringControl supplies snapshots from the completed transition.
+        self.reward_tar_dir = tar_dir if reward_tar_dir is None else reward_tar_dir
+        self.reward_tar_speed = tar_speed if reward_tar_speed is None else reward_tar_speed
+        self.reward_tar_face_dir = (
+            tar_face_dir if reward_tar_face_dir is None else reward_tar_face_dir
+        )
 
 
 class PathContext:

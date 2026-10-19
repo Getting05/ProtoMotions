@@ -103,8 +103,12 @@ class SteeringControl(ControlComponent):
             self.env.num_envs, 3, device=self.env.device, dtype=torch.float
         )
 
+        self._reward_tar_dir = self._tar_dir.clone()
+        self._reward_tar_speed = self._tar_speed.clone()
+        self._reward_tar_face_dir = self._tar_face_dir.clone()
+
     def reset(self, env_ids: Tensor):
-        """Reset steering task for given environments."""
+        """Reset position history only when the physical environment resets."""
         if len(env_ids) == 0:
             return
 
@@ -113,7 +117,13 @@ class SteeringControl(ControlComponent):
         anchor_pos = robot_state.rigid_body_pos[env_ids, anchor_body_index]
         self._prev_root_pos[env_ids] = anchor_pos
         self._curr_root_pos[env_ids] = anchor_pos
+        self._sample_commands(env_ids)
+        self._reward_tar_dir[env_ids] = self._tar_dir[env_ids]
+        self._reward_tar_speed[env_ids] = self._tar_speed[env_ids]
+        self._reward_tar_face_dir[env_ids] = self._tar_face_dir[env_ids]
 
+    def _sample_commands(self, env_ids: Tensor):
+        """Change commands without erasing the measured displacement."""
         n = len(env_ids)
         device = self.env.device
 
@@ -183,6 +193,12 @@ class SteeringControl(ControlComponent):
 
     def step(self):
         """Check if any environments need their heading task updated."""
+        # Score the completed transition against the command seen by its
+        # action, before a periodic update prepares the next observation.
+        self._reward_tar_dir.copy_(self._tar_dir)
+        self._reward_tar_speed.copy_(self._tar_speed)
+        self._reward_tar_face_dir.copy_(self._tar_face_dir)
+
         # Rotate double buffer: prev <- curr, curr <- new position
         self._prev_root_pos[:] = self._curr_root_pos
         robot_state = self.env.simulator.get_robot_state()
@@ -193,7 +209,7 @@ class SteeringControl(ControlComponent):
         reset_task_mask = self.env.progress_buf >= self._heading_change_steps
         env_ids = reset_task_mask.nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
-            self.reset(env_ids)
+            self._sample_commands(env_ids)
 
     def check_resets_and_terminations(self) -> Tuple[Tensor, Tensor]:
         """No terminations from steering control."""
@@ -222,6 +238,16 @@ class SteeringControl(ControlComponent):
             tar_speed=tar_speed,
             tar_face_dir=tar_face_dir,
             prev_root_pos=prev_root_pos,
+            reward_tar_dir=(
+                self._reward_tar_dir if env_ids is None else self._reward_tar_dir[env_ids]
+            ),
+            reward_tar_speed=(
+                self._reward_tar_speed if env_ids is None else self._reward_tar_speed[env_ids]
+            ),
+            reward_tar_face_dir=(
+                self._reward_tar_face_dir
+                if env_ids is None else self._reward_tar_face_dir[env_ids]
+            ),
         )
 
     def create_visualization_markers(

@@ -49,12 +49,18 @@ def compute_heading_velocity_rew(
     tar_speed: Tensor,
     tar_face_dir: Tensor,
     dt: float,
+    vel_err_scale: float = 0.25,
+    tangent_err_w: float = 0.1,
+    stop_vel_err_scale: float = 0.25,
 ) -> Tensor:
     """Reward for moving in target direction at target speed while facing that direction.
 
     Computes weighted combination of:
     - Direction reward: exponential penalty on velocity error and tangent velocity
     - Facing reward: alignment between robot heading and target direction
+
+    A zero-speed command rewards rest in every horizontal direction. The
+    backwards-motion cutoff applies only to positive-speed commands.
 
     Args:
         root_pos: Current root position [num_envs, 3].
@@ -63,14 +69,14 @@ def compute_heading_velocity_rew(
         tar_dir: Target movement direction [num_envs, 2].
         tar_speed: Target speed [num_envs].
         tar_face_dir: Target facing direction [num_envs, 2] (can differ from tar_dir).
-        dt: Simulation timestep.
+        dt: Control timestep used by the position difference.
+        vel_err_scale: Moving-command longitudinal error coefficient.
+        tangent_err_w: Relative lateral error weight while moving.
+        stop_vel_err_scale: Isotropic horizontal speed coefficient when stopping.
 
     Returns:
         Reward [num_envs] in range [0, 1].
     """
-
-    vel_err_scale = 0.25
-    tangent_err_w = 0.1
 
     dir_reward_w = 0.7
     facing_reward_w = 0.3
@@ -91,9 +97,16 @@ def compute_heading_velocity_rew(
         -vel_err_scale * (tar_vel_err * tar_vel_err + tangent_err_w * tangent_vel_err)
     )
 
-    # Zero reward for moving backwards
-    speed_mask = tar_dir_speed <= 0
-    dir_reward[speed_mask] = 0
+    # At rest there is no preferred movement direction. Penalize the full
+    # horizontal speed equally, rather than leaving a cheap lateral direction.
+    stop_reward = torch.exp(
+        -stop_vel_err_scale * torch.sum(torch.square(root_vel[..., :2]), dim=-1)
+    )
+    dir_reward = torch.where(tar_speed == 0, stop_reward, dir_reward)
+
+    # The moving-command cutoff must not discard the optimum at zero speed.
+    speed_mask = (tar_speed > 0) & (tar_dir_speed <= 0)
+    dir_reward = torch.where(speed_mask, torch.zeros_like(dir_reward), dir_reward)
 
     # Facing reward: robot should face the target facing direction
     heading_rot = calc_heading_quat(root_rot, w_last=True)

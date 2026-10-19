@@ -1163,8 +1163,17 @@ def target_reward_factory(
     )
 
 
-def steering_reward_factory(weight: float = 1.0) -> MdpComponent:
-    """Factory for heading and velocity steering reward."""
+def steering_reward_factory(
+    weight: float = 1.0,
+    vel_err_scale: float = 0.25,
+    tangent_err_w: float = 0.1,
+    stop_vel_err_scale: float = 0.25,
+) -> MdpComponent:
+    """Score the completed action, independently of next-observation commands.
+
+    Stop commands use an isotropic horizontal velocity error. Coefficients
+    are explicit so a new run can tune stopping without changing moving rewards.
+    """
     from protomotions.envs.rewards import compute_heading_velocity_rew
 
     return MdpComponent(
@@ -1173,12 +1182,17 @@ def steering_reward_factory(weight: float = 1.0) -> MdpComponent:
             "root_pos": EnvContext.current.anchor_pos,
             "prev_root_pos": EnvContext.steering.prev_root_pos,
             "root_rot": EnvContext.current.anchor_rot,
-            "tar_dir": EnvContext.steering.tar_dir,
-            "tar_speed": EnvContext.steering.tar_speed,
-            "tar_face_dir": EnvContext.steering.tar_face_dir,
+            "tar_dir": EnvContext.steering.reward_tar_dir,
+            "tar_speed": EnvContext.steering.reward_tar_speed,
+            "tar_face_dir": EnvContext.steering.reward_tar_face_dir,
             "dt": EnvContext.dt,
         },
-        static_params={"weight": weight},
+        static_params={
+            "weight": weight,
+            "vel_err_scale": vel_err_scale,
+            "tangent_err_w": tangent_err_w,
+            "stop_vel_err_scale": stop_vel_err_scale,
+        },
     )
 
 
