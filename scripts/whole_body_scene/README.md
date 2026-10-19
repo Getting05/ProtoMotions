@@ -1,5 +1,10 @@
 # BONES-SEED / Astro P2 whole-body scenes
 
+Start with [HANDOFF.md](HANDOFF.md) for branch history, preserved artifacts and
+returning to the main checkout. The current algorithm and commands are in
+[V2_DESIGN.md](V2_DESIGN.md); [V2_VALIDATION.json](V2_VALIDATION.json) records its
+validation. The sections below also retain the legacy experiments.
+
 This implementation reconstructs **conservative static collision hypotheses**
 from the existing retargeted P2 MotionLib. It preserves unresolved contacts and
 dynamic-object hypotheses rather than treating them as flat-ground negatives.
