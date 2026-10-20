@@ -1834,6 +1834,9 @@ def steering_velocity_error_factory(
 
 
 __all__ = [
+    "p2_motor_dof_ids",
+    "reduced_coord_obs_factory",
+    "historical_reduced_coord_obs_factory",
     # Observation factories
     "max_coords_obs_factory",
     "reduced_coords_obs_factory",
@@ -1894,3 +1897,37 @@ __all__ = [
     "path_distance_error_factory",
     "steering_velocity_error_factory",
 ]
+
+
+def p2_motor_dof_ids(robot_cfg) -> List[int]:
+    """Resolve 29 motor channels by name, preserving the P2 model DOF order."""
+    names = list(robot_cfg.kinematic_info.dof_names)
+    ids = [i for i, name in enumerate(names) if name != "head_joint"]
+    if len(names) != 30 or names.count("head_joint") != 1 or len(ids) != 29:
+        raise ValueError("P2 reduced_coord_obs requires 30 model DOFs including head_joint")
+    return ids
+
+
+def reduced_coord_obs_factory(robot_cfg, include_projected_gravity: bool = True) -> MdpComponent:
+    """P2 71D input with raw dq and P2DeployEnv's 200 Hz point IMU."""
+    from protomotions.envs.obs.p2_deploy_sensors import current_deploy_obs
+    return MdpComponent(
+        compute_func=current_deploy_obs,
+        dynamic_vars={"sensor_obs": EnvContext.p2_deploy.sensor_obs},
+        static_params={"motor_dof_ids": p2_motor_dof_ids(robot_cfg),
+                       "include_projected_gravity": include_projected_gravity,
+                       "quaternion_sign": "preserve",
+                       "contract_version": 3},
+    )
+
+
+def historical_reduced_coord_obs_factory(robot_cfg, history_steps: List[int]) -> MdpComponent:
+    """Use actual stored 50 Hz samples from the unfiltered P2 sensor bank."""
+    from protomotions.envs.obs.p2_deploy_sensors import historical_deploy_obs
+    if not history_steps or min(history_steps) < 1:
+        raise ValueError("history_steps must contain positive 1-based offsets")
+    return MdpComponent(
+        compute_func=historical_deploy_obs,
+        dynamic_vars={"sensor_history": EnvContext.p2_deploy.sensor_history},
+        static_params={"history_steps": list(history_steps)},
+    )

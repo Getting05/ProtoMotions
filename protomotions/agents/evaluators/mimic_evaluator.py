@@ -62,7 +62,7 @@ class MimicEvaluator(BaseEvaluator):
             metrics, num_motions, motion_num_frames, max_eval_steps
         )
 
-        num_dofs = self.env.robot_config.kinematic_info.num_dofs
+        num_dofs = self.env.get_action_size()
         metrics["actions"] = MotionMetrics(
             num_motions, motion_num_frames, max_eval_steps, num_dofs, device=self.device
         )

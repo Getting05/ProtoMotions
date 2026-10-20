@@ -572,6 +572,12 @@ class SceneSurfaceContext:
 # =============================================================================
 
 
+class P2DeploySensorView:
+    """Preprocessed rl_deploy sensor inputs for the independent P2 environment."""
+    sensor_obs: Tensor = FieldPath()
+    sensor_history: Tensor = FieldPath()
+
+
 class EnvContext:
     """Complete typed context for observation, reward, and termination functions.
 
@@ -597,6 +603,8 @@ class EnvContext:
 
     All fields are FieldPath or NestedField descriptors for dual class/instance access.
     """
+
+    p2_deploy: Optional[P2DeploySensorView] = NestedField(P2DeploySensorView)
 
     # Core state (always present)
     current: CurrentStateView = NestedField(CurrentStateView)
