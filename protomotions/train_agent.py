@@ -192,6 +192,11 @@ def create_parser():
         "--batch-size", type=int, required=True, help="Batch size for training"
     )
     parser.add_argument(
+        "--gpc-exclude-failed-motions",
+        action=argparse.BooleanOptionalAction, default=None,
+        help="Exclude the screened 2,633 failed motions; enabled automatically for P2 GPC/FSQ training, including resume.",
+    )
+    parser.add_argument(
         "--motion-file",
         type=str,
         required=True,
@@ -451,7 +456,9 @@ def prepare_inference_configs_for_save(*configs):
     configs may need to embed lightweight construction metadata for frozen
     modules whose weights are saved inside the owning checkpoint.
     """
+    from protomotions.utils.motion_exclusions import clear_bundled_training_exclusions
     for config in configs:
+        clear_bundled_training_exclusions(config)
         hook = getattr(config, "prepare_inference_config_for_save", None)
         if callable(hook):
             hook()
@@ -645,6 +652,7 @@ def main():
     )
     prior_eval_options = explicit_prior_eval_options(args)
     physics_guard_override = args.physics_guard
+    gpc_exclusion_override = getattr(args, "gpc_exclude_failed_motions", None)
     eval_num_motions_override = args.eval_num_motions
     if eval_num_motions_override is not None and eval_num_motions_override < 0:
         raise ValueError("--eval-num-motions must be non-negative")
@@ -782,6 +790,9 @@ def main():
                 )
 
         motion_lib_config.validate()
+
+    from protomotions.utils.motion_exclusions import configure_gpc_training_exclusions
+    configure_gpc_training_exclusions(args, env_config, agent_config, gpc_exclusion_override)
 
     # Apply after loading frozen resume configs: this memory limit is an explicit
     # runtime override, so an old checkpoint cannot silently discard it.
