@@ -1,5 +1,5 @@
 <robot
-  name="astro">
+  name="astro" xmlns:p2="urn:protomotions:p2:control:1">
   <mujoco>
     <compiler meshdir="../meshes" discardvisual="false"/>
   </mujoco>
@@ -106,8 +106,9 @@
     <limit
       lower="-2.62"
       upper="2.62"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="-0.312" />
   </joint>
   <link
     name="left_hip_roll_link">
@@ -164,8 +165,9 @@
     <limit
       lower="-0.26"
       upper="2.79"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.0" />
   </joint>
   <link
     name="left_hip_yaw_link">
@@ -222,8 +224,9 @@
     <limit
       lower="-1.57"
       upper="3.67"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.0" />
   </joint>
   <link
     name="left_knee_link">
@@ -280,8 +283,9 @@
     <limit
       lower="-0.09"
       upper="2.44"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.669" />
   </joint>
   <link
     name="left_ankle_pitch_link">
@@ -338,8 +342,9 @@
     <limit
       lower="-0.79"
       upper="0.52"
-      effort="60"
+      effort="60.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="60.0" velocity_limit="26.18" default_position="-0.363" />
   </joint>
   <link
     name="left_ankle_roll_link">
@@ -396,8 +401,9 @@
     <limit
       lower="-0.35"
       upper="0.35"
-      effort="45"
+      effort="45.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="45.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="right_hip_pitch_link">
@@ -454,8 +460,9 @@
     <limit
       lower="-2.62"
       upper="2.62"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="-0.312" />
   </joint>
   <link
     name="right_hip_roll_link">
@@ -512,8 +519,9 @@
     <limit
       lower="-2.79"
       upper="0.26"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.0" />
   </joint>
   <link
     name="right_hip_yaw_link">
@@ -570,8 +578,9 @@
     <limit
       lower="-3.67"
       upper="1.57"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.0" />
   </joint>
   <link
     name="right_knee_link">
@@ -628,8 +637,9 @@
     <limit
       lower="-0.09"
       upper="2.44"
-      effort="130"
+      effort="130.0"
       velocity="23.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="23.04" default_position="0.669" />
   </joint>
   <link
     name="right_ankle_pitch_link">
@@ -686,8 +696,9 @@
     <limit
       lower="-0.79"
       upper="0.52"
-      effort="60"
+      effort="60.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="60.0" velocity_limit="26.18" default_position="-0.363" />
   </joint>
   <link
     name="right_ankle_roll_link">
@@ -744,8 +755,9 @@
     <limit
       lower="-0.35"
       upper="0.35"
-      effort="45"
+      effort="45.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="45.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="waist_yaw_link">
@@ -802,8 +814,9 @@
     <limit
       lower="-1.57"
       upper="3.67"
-      effort="130"
+      effort="130.0"
       velocity="13.04" />
+    <p2:control stiffness="174.3502207607689" damping="11.099479785295827" armature="0.04416342683946" friction="0.0" effort_limit="130.0" velocity_limit="13.04" default_position="0.0" />
   </joint>
   <link
     name="waist_pitch_link">
@@ -860,8 +873,9 @@
     <limit
       lower="-0.37"
       upper="0.44"
-      effort="60"
+      effort="60.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="60.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="waist_roll_link">
@@ -918,8 +932,9 @@
     <limit
       lower="-0.28"
       upper="0.28"
-      effort="50"
+      effort="50.0"
       velocity="26.18" />
+    <p2:control stiffness="68.97888530429275" damping="4.391332226058835" armature="0.0174725557634" friction="0.0" effort_limit="50.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="torso_link">
@@ -1029,8 +1044,9 @@
     <limit
       lower="-2.79"
       upper="2.79"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.2" />
   </joint>
   <link
     name="left_shoulder_roll_link">
@@ -1087,8 +1103,9 @@
     <limit
       lower="-0.26"
       upper="2.62"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.2" />
   </joint>
   <link
     name="left_shoulder_yaw_link">
@@ -1145,8 +1162,9 @@
     <limit
       lower="-1.92"
       upper="1.92"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="left_elbow_link">
@@ -1203,8 +1221,9 @@
     <limit
       lower="-0.52"
       upper="1.66"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.6" />
   </joint>
   <link
     name="left_wrist_roll_link">
@@ -1261,8 +1280,9 @@
     <limit
       lower="-1.92"
       upper="1.92"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="left_wrist_pitch_link">
@@ -1319,8 +1339,9 @@
     <limit
       lower="-1.31"
       upper="1.31"
-      effort="10"
+      effort="10.0"
       velocity="20.94" />
+    <p2:control stiffness="13.571156421285899" damping="0.719972209306989" armature="0.002387232" friction="0.0" effort_limit="10.0" velocity_limit="20.94" default_position="0.0" />
   </joint>
   <link
     name="left_wrist_yaw_link">
@@ -1377,8 +1398,9 @@
     <limit
       lower="-1.31"
       upper="1.31"
-      effort="10"
+      effort="10.0"
       velocity="20.94" />
+    <p2:control stiffness="13.571156421285899" damping="0.719972209306989" armature="0.002387232" friction="0.0" effort_limit="10.0" velocity_limit="20.94" default_position="0.0" />
   </joint>
   <link
     name="left_hand_link">
@@ -1488,8 +1510,9 @@
     <limit
       lower="-2.79"
       upper="2.79"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.2" />
   </joint>
   <link
     name="right_shoulder_roll_link">
@@ -1546,8 +1569,9 @@
     <limit
       lower="-2.62"
       upper="0.26"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="-0.2" />
   </joint>
   <link
     name="right_shoulder_yaw_link">
@@ -1604,8 +1628,9 @@
     <limit
       lower="-1.92"
       upper="1.92"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="right_elbow_link">
@@ -1662,8 +1687,9 @@
     <limit
       lower="-0.52"
       upper="1.66"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.6" />
   </joint>
   <link
     name="right_wrist_roll_link">
@@ -1720,8 +1746,9 @@
     <limit
       lower="-1.92"
       upper="1.92"
-      effort="30"
+      effort="30.0"
       velocity="26.18" />
+    <p2:control stiffness="34.48944265214637" damping="2.1956661130294175" armature="0.0087362778817" friction="0.0" effort_limit="30.0" velocity_limit="26.18" default_position="0.0" />
   </joint>
   <link
     name="right_wrist_pitch_link">
@@ -1778,8 +1805,9 @@
     <limit
       lower="-1.31"
       upper="1.31"
-      effort="10"
+      effort="10.0"
       velocity="20.94" />
+    <p2:control stiffness="13.571156421285899" damping="0.719972209306989" armature="0.002387232" friction="0.0" effort_limit="10.0" velocity_limit="20.94" default_position="0.0" />
   </joint>
   <link
     name="right_wrist_yaw_link">
@@ -1836,8 +1864,9 @@
     <limit
       lower="-1.31"
       upper="1.31"
-      effort="10"
+      effort="10.0"
       velocity="20.94" />
+    <p2:control stiffness="13.571156421285899" damping="0.719972209306989" armature="0.002387232" friction="0.0" effort_limit="10.0" velocity_limit="20.94" default_position="0.0" />
   </joint>
   <link
     name="right_hand_link">
@@ -1947,8 +1976,9 @@
     <limit
       lower="-0.61"
       upper="0.61"
-      effort="10"
+      effort="10.0"
       velocity="20.94" />
+    <p2:control stiffness="9.423498282160118" damping="0.8998777996942602" armature="0.002387" friction="0.0" effort_limit="10.0" velocity_limit="20.94" default_position="0.0" />
   </joint>
   <link
     name="imu_2_link">
@@ -2109,4 +2139,6 @@
     <axis
       xyz="0 0 0" />
   </joint>
+  <!-- P2 control metadata: active PD is separate from passive URDF dynamics. -->
+  <p2:initial_state root_height="0.645" root_quaternion_xyzw="0 0 0 1" soft_joint_pos_limit_factor="0.9" source_revision="e7b8cc7" />
 </robot>

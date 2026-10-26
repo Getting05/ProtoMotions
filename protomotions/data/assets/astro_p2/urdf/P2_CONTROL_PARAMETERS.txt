@@ -1,0 +1,39 @@
+P2 URDF control parameters — updated 2026-10-26
+
+All three URDFs contain the same current P2 control parameters, exported by
+joint name from ProtoMotions main's astro_p2.py and astro_p2_pose.py.
+Geometry, inertial tensors, joint axes/origins and position limits are preserved.
+Standard URDF effort/velocity limits match the current control configuration.
+
+Each movable joint has a p2:control extension in XML namespace
+urn:protomotions:p2:control:1. Fields and units:
+  stiffness: Nm/rad (active controller Kp)
+  damping: Nm*s/rad (active controller Kd)
+  armature: kg*m^2 (joint-side motor inertia, already gearbox-reduced)
+  friction: joint friction coefficient from the source control configuration (0)
+  effort_limit: Nm
+  velocity_limit: rad/s
+  default_position: rad
+The root p2:initial_state gives root_height in metres, identity root quaternion
+in XYZW order, and the soft position-limit factor (0.9).
+Head joint parameters are retained from the 30-DOF configuration because the
+original reference supplied only 29 body joints.
+
+IMPORTANT: These custom tags are metadata, not native URDF control semantics.
+Ordinary URDF readers ignore the extra metadata. Use load_p2_control.py or
+p2_control_parameters.json and explicitly set your simulator's armature and
+controller's gains, limits and initial pose by joint name. Do not copy active
+Kd into URDF dynamics/damping: that is passive damping and would add a second
+physical damping term. Do not add armature to link inertial tensors.
+This update does not implement command delay, T-N curves, or parallel actuators.
+
+Reader example (run from this directory):
+  python load_p2_control.py astro_p2_30dof_primitive_collision.urdf
+Python use:
+  from load_p2_control import load_control_parameters
+  cfg = load_control_parameters('astro_p2_30dof_primitive_collision.urdf')
+  kp = cfg['joints']['left_hip_pitch_joint']['stiffness']
+The returned configuration matches the adjacent p2_control_parameters.json.
+
+Reference for passive joint dynamics:
+https://docs.ros.org/en/rolling/Tutorials/Intermediate/URDF/Adding-Physical-and-Collision-Properties-to-a-URDF-Model.html
