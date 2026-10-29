@@ -18,12 +18,10 @@ from protomotions.agents.common.autoregressive import (
 from protomotions.agents.common.latent import compute_discrete_latent_ppo_loss
 from protomotions.agents.fine_tuning.agent import FineTuningAgent
 from protomotions.agents.peft.prior_setup import DiscretePriorPEFTSetupMixin
-
-log = logging.getLogger(__name__)
-
-
 from protomotions.utils.guarded_rlft import PhysicsGuardRLFTMixin, moments
 from protomotions.utils.valid_samples import current_valid_mask
+
+log = logging.getLogger(__name__)
 
 
 class DiscretePriorPEFTRLFTAgent(PhysicsGuardRLFTMixin, DiscretePriorPEFTSetupMixin, FineTuningAgent):
@@ -201,6 +199,14 @@ class DiscretePriorPEFTRLFTAgent(PhysicsGuardRLFTMixin, DiscretePriorPEFTSetupMi
         return critic_loss, log_dict
 
     def perform_optimization_step(self, batch_dict, batch_idx) -> Dict:
+        """Route this class's own update through valid-sample guard handling."""
+        from protomotions.utils import guarded_rlft
+
+        return guarded_rlft.optimization_guarded(
+            self, self._perform_optimization_step, batch_dict, batch_idx
+        )
+
+    def _perform_optimization_step(self, batch_dict, batch_idx) -> Dict:
         """Run one PEFT PPO minibatch update."""
         if batch_idx == 0:
             self._kl_early_stop_triggered = False
