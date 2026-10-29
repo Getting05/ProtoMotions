@@ -56,6 +56,11 @@ class MotionManagerConfig:
         }
     )
 
+    exclude_motion_sources_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "Portable source-motion blacklist JSON; preserves original motion IDs."},
+    )
+
     realign_motion_with_humanoid_on_each_step: bool = field(
         default=False,
         metadata={

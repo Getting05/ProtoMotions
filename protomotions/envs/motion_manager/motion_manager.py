@@ -100,6 +100,7 @@ class MotionManager:
 
         # Handle motion exclusion (store excluded IDs to apply during sampling)
         self._setup_motion_exclusion()
+        self._apply_motion_exclusions()
 
         # Zero out weights for clips too short to satisfy sample_time_truncate_s.
         # Reset sampling truncates the window by (truncate_s + env_dt); a clip
@@ -112,6 +113,10 @@ class MotionManager:
 
         # Handle fixed motion IDs for scene-motion correspondence
         self._setup_fixed_motion_ids(fixed_motion_ids_per_env)
+        if self.available_motion_ids is not None:
+            self._validate_source_motion_ids(self.available_motion_ids)
+        if fixed_motion_ids_per_env is not None:
+            self._validate_source_motion_ids(fixed_motion_ids_per_env[fixed_motion_ids_per_env >= 0])
 
     def _setup_motion_subset(self):
         """
@@ -186,6 +191,12 @@ class MotionManager:
             file_ids = self._load_exclusions_from_file(self.config.exclude_motions_file)
             if file_ids:
                 excluded_set.update(file_ids)
+
+        source_file = getattr(self.config, "exclude_motion_sources_file", None)
+        if source_file is not None:
+            from protomotions.utils.motion_exclusions import source_excluded_ids
+
+            excluded_set.update(source_excluded_ids(source_file, self.motion_lib.motion_files))
 
         if self.config.exclude_motion_ids is not None:
             if isinstance(self.config.exclude_motion_ids, (list, ListConfig)):
@@ -326,6 +337,13 @@ class MotionManager:
         if self.excluded_motion_ids is not None:
             self.motion_weights[self.excluded_motion_ids] = 0.0
 
+    def _validate_source_motion_ids(self, motion_ids):
+        """Explicit/fixed training resets must not bypass the source blacklist."""
+        if (getattr(self.config, "exclude_motion_sources_file", None) is not None
+                and self.excluded_motion_ids is not None
+                and torch.isin(motion_ids, self.excluded_motion_ids).any()):
+            raise ValueError("Requested motion IDs include a source-blacklisted motion; choose an allowed clip or explicitly disable the training blacklist")
+
     def sample_n_motion_ids(self, n: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sample motion IDs from weighted distribution.
 
@@ -416,6 +434,8 @@ class MotionManager:
                 # Pure random sampling
                 new_motion_ids = self.sample_n_motion_ids(len(env_ids))
 
+        self._validate_source_motion_ids(new_motion_ids)
+
         # Truncate reset sampling by env_dt plus the optional configured margin so
         # random reset times stay away from the end of the clip (matched by the
         # too-short-clip weight zeroing in __init__).
@@ -464,3 +484,4 @@ class MotionManager:
                 self.motion_weights[:] = state_dict["motion_weights"].to(
                     self.motion_weights.device
                 )
+                self._apply_motion_exclusions()
