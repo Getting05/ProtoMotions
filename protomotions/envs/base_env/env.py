@@ -1943,6 +1943,8 @@ class BaseEnv:
             )
         if self.scene_lib.num_objects_per_scene > 0:
             snapshot["object_state"] = self.simulator.get_object_root_state()
+        if hasattr(self.simulator, 'save_runtime_state'):
+            snapshot['backend_runtime'] = self.simulator.save_runtime_state()
         return snapshot
 
     def restore_state(self, snapshot: dict) -> None:
@@ -1959,6 +1961,8 @@ class BaseEnv:
             snapshot["robot_state"], snapshot.get("object_state"), env_ids
         )
 
+        if 'backend_runtime' in snapshot:
+            self.simulator.load_runtime_state(snapshot['backend_runtime'])
         if "state_history" in snapshot and self.state_history is not None:
             self.state_history.load_state(snapshot["state_history"])
 

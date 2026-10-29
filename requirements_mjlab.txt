@@ -1,0 +1,7 @@
+# Dedicated Python 3.12 environment. Do not combine with other simulator extras.
+mjlab==1.6.0
+torch==2.11.0
+tensordict==0.9.0
+wandb==0.23.0
+lightning>=2.3,<2.6
+pytest

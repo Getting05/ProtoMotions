@@ -14,6 +14,14 @@ def install_guard(agent):
     if not getattr(agent.config, 'physics_guard_enabled', True):
         log.info('PHYSICS_GUARD disabled by configuration')
         return
+    if agent.env.simulator.__class__.__module__ == 'protomotions.simulator.mjlab.simulator':
+        from protomotions.simulator.mjlab.physics_guard import MjLabPhysicsGuard
+        agent.env.simulator._physics_guard = MjLabPhysicsGuard(
+            agent.env.simulator, env=agent.env, folder=agent.root_dir / 'physics_guard',
+            joint_speed_limit=getattr(agent.config, 'physics_guard_joint_speed_limit', 1000.),
+            max_consecutive=getattr(agent.config, 'physics_guard_max_consecutive', 3))
+        log.info('PHYSICS_GUARD enabled for mjlab')
+        return
     if agent.env.simulator.__class__.__module__ != 'protomotions.simulator.isaaclab.simulator':
         return
     from protomotions.utils.physics_guard import PhysicsGuard

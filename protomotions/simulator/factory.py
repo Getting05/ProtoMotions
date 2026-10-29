@@ -22,6 +22,9 @@ def get_simulator_config_class(simulator: str):
     Raises:
         ValueError: If simulator type is not supported
     """
+    if simulator == "mjlab":
+        from protomotions.simulator.mjlab.config import MjLabSimulatorConfig
+        return MjLabSimulatorConfig
     if simulator == "isaacgym":
         from protomotions.simulator.isaacgym.config import IsaacGymSimulatorConfig
 
