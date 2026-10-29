@@ -1,6 +1,6 @@
 """Real robot API: measured proprioception only. Fixed window matches training."""
 import torch
-from .models import PelvisEstimator
+from .models_v2 import build_estimator
 from .physics import FootKinematics
 
 
@@ -12,7 +12,7 @@ class RealtimeEstimator:
         self.device=torch.device(device)
         self.physics=FootKinematics(urdf or contract['urdf'],contract['dof_names'],contract['body_names'],contract['imu']).to(device)
         if self.physics.sha256 != contract['sha256']: raise ValueError('URDF checksum differs from training')
-        self.model=PelvisEstimator(mode=bundle['mode'],**config['model']).to(device).eval()
+        self.model=build_estimator(bundle).to(device).eval()
         self.model.load_state_dict(bundle['model'])
         self.history_length=config['history_length']
         self.dt=1./config['control_frequency']

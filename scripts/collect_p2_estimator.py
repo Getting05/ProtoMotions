@@ -22,9 +22,15 @@ for path in (checkpoint,checkpoint.parent/'resolved_configs_inference.pt',Path(a
 config=json.loads(Path(a.config).read_text())
 manifest=json.loads(Path(a.manifest).read_text())
 if not manifest['motions']: raise ValueError('Manifest needs motions')
-allowed_categories={'stand','walk_forward','walk_backward','walk_sideways','turn','stop','squat','rise','run','jump','push','slip'}
+allowed_categories={'stand','walk_forward','walk_backward','walk_sideways','turn','stop','squat','rise','run','jump','push','slip','dance','kneel'}
 if any(m.get('category') not in allowed_categories for m in manifest['motions']):
     raise ValueError('Review manifest categories; unclassified motions are not accepted')
+groups={}
+for m in manifest['motions']:
+    if 'split' in m:
+        if m['split'] not in ('train','validation','test'): raise ValueError('Unknown manifest split')
+        if groups.setdefault(m['group_id'],m['split']) != m['split']:
+            raise ValueError('A motion group crosses dataset splits')
 if min(a.num_envs,a.episodes,a.max_steps)<1: raise ValueError('Positive counts required')
 from protomotions.utils.simulator_imports import import_simulator_before_torch
 AppLauncher=import_simulator_before_torch('isaaclab')
@@ -97,6 +103,9 @@ def run(app,fabric):
     def reset(ids):
         nonlocal next_motion
         for i in ids.tolist():
+            if next_motion>=a.episodes:
+                assigned[i]=None
+                continue
             assigned[i]=motions[next_motion%len(motions)]; next_motion+=1
             env.motion_manager.motion_ids[i]=assigned[i]['motion_id']
             env.motion_manager.motion_times[i]=0.
@@ -116,16 +125,19 @@ def run(app,fabric):
             obs,_,done,terminated,_=env.step(action)
             sample=reader.read(env._current_processed_action)
             done=done.bool()|env.motion_manager.get_done_tracks()
+            # Transfer each batched field once; per-environment copies stay on CPU.
+            sample_cpu={k:v.detach().cpu() for k,v in sample.items()}
             for i in range(a.num_envs):
+                if assigned[i] is None: continue
                 lengths[i]+=1
-                frame={k:v[i].detach().cpu().clone() for k,v in sample.items()}
+                frame={k:v[i].clone() for k,v in sample_cpu.items()}
                 frame['time']=torch.tensor(lengths[i]*env.dt,dtype=torch.float64)
                 buffers[i].append(frame)
                 if lengths[i]>=a.max_steps: done[i]=True
                 if done[i] and completed<a.episodes:
                     motion=assigned[i]; group=motion['group_id']
                     metadata=dict(file=f'episode_{completed:06d}.pt',group_id=group,
-                        split=split_for_group(group,config['seed']),category=motion['category'],
+                        split=motion.get('split',split_for_group(group,config['seed'])),category=motion['category'],
                         motion_id=motion['motion_id'],motion_name=motion['motion_name'],
                         frames=lengths[i],terminated=bool(terminated[i]))
                     episode={k:torch.stack([f[k] for f in buffers[i]]) for k in buffers[i][0]}

@@ -7,7 +7,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from .data import EpisodeWindows
-from .models import PelvisEstimator,fuse_candidates
+from .models import fuse_candidates
+from .models_v2 import build_estimator
 from .physics import FootKinematics
 from .inference import RealtimeEstimator
 
@@ -27,6 +28,7 @@ def metrics(pred,target):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--data',required=True); p.add_argument('--output',required=True)
+    p.add_argument('--split',choices=['validation','test'],default='validation')
     p.add_argument('--checkpoint'); p.add_argument('--physics-oracle',action='store_true')
     p.add_argument('--device',default='cuda:0'); p.add_argument('--history',type=int,default=25)
     p.add_argument('--threads',type=int,default=4); p.add_argument('--batch-size',type=int,default=256)
@@ -36,7 +38,7 @@ def main():
     bundle=torch.load(a.checkpoint,map_location=a.device,weights_only=True) if a.checkpoint else None
     history=bundle['config']['history_length'] if bundle else a.history
     noise=json.loads(Path(a.noise_config).read_text())['noise'] if a.noise_config else None
-    ds=EpisodeWindows(a.data,'validation',history,noise=noise)
+    ds=EpisodeWindows(a.data,a.split,history,noise=noise)
     contract=ds.index['contract']
     physics=FootKinematics(contract['urdf'],contract['dof_names'],contract['body_names'],contract['imu']).to(a.device)
     if physics.sha256 != contract['sha256']: raise ValueError('Dataset URDF checksum mismatch')
@@ -44,16 +46,17 @@ def main():
         if bundle['contract'] != contract: raise ValueError('Checkpoint/dataset contract differs')
         if abs(ds.index['dt']-1/bundle['config']['control_frequency'])>1e-8: raise ValueError('Frequency mismatch')
         # Prevent evaluating training groups from another supplied dataset as held out.
-        training_groups={e['group_id'] for e in bundle['data_index']['episodes'] if e['split']=='train'}
+        training_groups={e['group_id'] for e in bundle['data_index']['episodes'] if e['split']=='train' or (a.split=='test' and e['split']=='validation')}
         if training_groups & {e['meta']['group_id'] for e in ds.episodes}:
-            raise ValueError('Evaluation contains checkpoint training motion groups')
-        model=PelvisEstimator(mode=bundle['mode'],**bundle['config']['model']).to(a.device).eval()
+            raise ValueError('Evaluation leaks training or model-selection motion groups')
+        model=build_estimator(bundle).to(a.device).eval()
         model.load_state_dict(bundle['model'])
+    if not bundle or bundle['mode']!='baseline': ds.cache_candidates(physics,a.device)
     records=[]
     with torch.inference_mode():
         for b in DataLoader(ds,batch_size=a.batch_size):
             x=b['proprio'].to(a.device); contact=b['contact'].to(a.device)
-            candidates=physics(x)
+            candidates=b['candidates'].to(a.device) if 'candidates' in b else x.new_zeros(*x.shape[:2],2,4)
             if bundle:
                 out=model(x,candidates,contact if bundle['mode']=='oracle' else None)
                 pred=out['state'][:,-1]; prob=out['contact_probability'][:,-1]
@@ -70,12 +73,16 @@ def main():
     probabilities=torch.stack([r['p'] for r in records]); contacts=torch.stack([r['contact'] for r in records])
     valid=torch.tensor([r['valid'] for r in records])
     categories=[ds.episodes[r['episode']]['meta']['category'] for r in records]
-    report=dict(mode=bundle['mode'] if bundle else 'physics_oracle',
+    report=dict(split=a.split,mode=bundle['mode'] if bundle else 'physics_oracle',
                 synthetic_only=ds.index.get('synthetic_only',False),noise=noise,
                 supported_coverage=valid.float().mean().item(),
                 aggregate=metrics(preds[valid],truth[valid]) if valid.any() else None,
-                categories={},events={},missing_categories=sorted(set(REQUIRED_CATEGORIES)-set(categories)))
+                support_regimes={},categories={},events={},missing_categories=sorted(set(REQUIRED_CATEGORIES)-set(categories)))
     limits=(bundle or {}).get('config',{}).get('acceptance',dict(height_mae=.03,xy_rmse=.1,z_rmse=.15))
+    reliable=contacts.sum(-1)
+    for label,mask in [('reliable_support',reliable>0),('no_reliable_support',reliable==0),('single_support',reliable==1),('double_support',reliable==2)]:
+        mask=mask&valid
+        report['support_regimes'][label]=metrics(preds[mask],truth[mask]) if mask.any() else dict(samples=0)
     for category in sorted(set(categories)):
         mask=torch.tensor([c==category for c in categories])&valid
         m=metrics(preds[mask],truth[mask]) if mask.any() else dict(samples=0)

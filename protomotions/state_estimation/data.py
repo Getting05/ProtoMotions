@@ -27,16 +27,22 @@ def read_index(directory):
         raise ValueError('Unsupported dataset schema')
     groups = {}
     for ep in entries['episodes']:
+        if ep['split'] not in ('train','validation','test'): raise ValueError('Unknown dataset split')
         prior = groups.setdefault(ep['group_id'],ep['split'])
         if prior != ep['split']:
-            raise ValueError('Motion family appears in train AND validation')
+            raise ValueError('Motion family appears in multiple dataset splits')
     return entries
 
 
 class EpisodeWindows(Dataset):
-    def __init__(self,directory,split,history=25,noise=None,seed=42,stride=1):
+    def __init__(self,directory,split,history=25,noise=None,seed=42,stride=1,window_history=None):
         self.index=read_index(directory)
         self.history=history
+        # Match supervised target frames across history-length ablations. The
+        # returned input still contains exactly `history` frames, without padding.
+        self.window_history=history if window_history is None else window_history
+        if history < 1 or self.window_history < history:
+            raise ValueError('window_history must be >= history >= 1')
         self.episodes,self.windows=[],[]
         generator=torch.Generator().manual_seed(seed)
         for meta in self.index['episodes']:
@@ -47,6 +53,14 @@ class EpisodeWindows(Dataset):
                 raise ValueError('Episode shape mismatch')
             if not all(torch.isfinite(ep[k]).all() for k in ('proprio','target','contact')):
                 raise ValueError('Nonfinite training tensors')
+            # Finite values alone do not catch a diverged physics rollout. Reset/IMU
+            # warmup frames are already excluded from every training window.
+            valid=ep['valid']
+            bad=(ep['proprio'].abs().amax(-1)>1e5)|(ep['target'][:,1:].abs().amax(-1)>20)|(ep['target'][:,0].abs()>5)
+            if 'fk_audit' in ep:
+                bad=bad|(ep['fk_audit'][:,0]>.005)|(ep['fk_audit'][:,1]>.02)
+            if (bad&valid).any():
+                raise ValueError(f'Physically invalid rollout: {meta["file"]}; quarantine or recollect before training')
             intervals=ep['time'][1:]-ep['time'][:-1]
             if not torch.allclose(intervals,torch.full_like(intervals,self.index['dt']),atol=1e-5,rtol=1e-4):
                 raise ValueError('Episode timestamps do not match the control period')
@@ -54,8 +68,8 @@ class EpisodeWindows(Dataset):
             ep={**ep,'proprio':x,'meta':meta}
             i=len(self.episodes); self.episodes.append(ep)
             # No padded training windows; derivative-invalid/reset/delayed samples excluded.
-            for end in range(history-1+delay,n,stride):
-                if ep['valid'][end-history+1:end+1].all():
+            for end in range(self.window_history-1+delay,n,stride):
+                if ep['valid'][end-self.window_history+1:end+1].all():
                     self.windows.append((i,end))
         if not self.windows:
             raise ValueError(f'No valid {split} windows; collect disjoint motion groups and longer episodes')
@@ -65,8 +79,18 @@ class EpisodeWindows(Dataset):
     def __getitem__(self,index):
         i,end=self.windows[index]; ep=self.episodes[i]
         start=end-self.history+1
-        return dict(proprio=ep['proprio'][start:end+1],target=ep['target'][end],
+        sample=dict(proprio=ep['proprio'][start:end+1],target=ep['target'][end],
                     contact=ep['contact'][start:end+1],episode=i,end=end)
+        if 'candidates' in ep: sample['candidates']=ep['candidates'][start:end+1]
+        return sample
+
+    @torch.no_grad()
+    def cache_candidates(self,physics,device,chunk_size=2048):
+        # Augmentation is fixed per episode. Cache from the exact measured inputs;
+        # never recompute identical overlapping-window FK during every epoch.
+        for ep in self.episodes:
+            ep['candidates']=torch.cat([physics(chunk.to(device)).cpu()
+                for chunk in ep['proprio'].split(chunk_size)])
 
     def normalization(self):
         # Compute exclusively from this split, once per frame (not overlapping windows).
