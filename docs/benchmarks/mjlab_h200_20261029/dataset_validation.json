@@ -1,0 +1,23 @@
+{
+  "motions": 512,
+  "frames": 483995,
+  "families": {
+    "amass": 44,
+    "bvh": 324,
+    "fzmotion_50hz": 7,
+    "hiphi_51_all": 18,
+    "hiphi_all": 56,
+    "running": 59,
+    "lafan1": 4
+  },
+  "dataset_sha256": "e79bd8df79f4845b9ec05de002b20c5f7545a58c368c6d484dd0b157e7a9e56e",
+  "fps": [
+    50.0
+  ],
+  "root_height_min": 0.07464645802974701,
+  "root_height_max": 0.9900696277618408,
+  "max_abs_joint_velocity": 26.192785263061523,
+  "left_foot_contact_fraction": 0.5978450179100037,
+  "right_foot_contact_fraction": 0.573340654373169,
+  "tensor_bytes": 911376921
+}

@@ -1,0 +1,174 @@
+{
+  "mjlab_astro512_single256_20261029": {
+    "info/episode_length": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 15.55555534362793
+      },
+      "last": {
+        "step": 100,
+        "value": 40.70443344116211
+      },
+      "last10_mean": 40.35516777038574
+    },
+    "info/episode_reward": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 10.934136390686035
+      },
+      "last": {
+        "step": 100,
+        "value": 32.27705383300781
+      },
+      "last10_mean": 32.08262195587158
+    },
+    "rewards/task_rewards": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.12093892693519592
+      },
+      "last": {
+        "step": 100,
+        "value": 0.0552704893052578
+      },
+      "last10_mean": 0.05525731146335602
+    },
+    "rewards/unnormalized_task_rewards": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.8075426816940308
+      },
+      "last": {
+        "step": 100,
+        "value": 0.8104075193405151
+      },
+      "last10_mean": 0.7975810527801513
+    },
+    "actor/internals/perplexity": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 1.0
+      },
+      "last": {
+        "step": 100,
+        "value": 2.451584577560425
+      },
+      "last10_mean": 2.400455951690674
+    },
+    "actor/bad_grads_count": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.0
+      },
+      "last": {
+        "step": 100,
+        "value": 0.0
+      },
+      "last10_mean": 0.0
+    },
+    "critic/bad_grads_count": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.0
+      },
+      "last": {
+        "step": 100,
+        "value": 0.0
+      },
+      "last10_mean": 0.0
+    }
+  },
+  "mjlab_astro512_dual256_budget4_20261029": {
+    "info/episode_length": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 15.591548919677734
+      },
+      "last": {
+        "step": 100,
+        "value": 51.898887634277344
+      },
+      "last10_mean": 45.988711547851565
+    },
+    "info/episode_reward": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 11.261148452758789
+      },
+      "last": {
+        "step": 100,
+        "value": 43.04866027832031
+      },
+      "last10_mean": 37.61642837524414
+    },
+    "rewards/task_rewards": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.12206084281206131
+      },
+      "last": {
+        "step": 100,
+        "value": 0.050108276307582855
+      },
+      "last10_mean": 0.05148144848644733
+    },
+    "rewards/unnormalized_task_rewards": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.8155391216278076
+      },
+      "last": {
+        "step": 100,
+        "value": 0.8321965932846069
+      },
+      "last10_mean": 0.822788679599762
+    },
+    "actor/internals/perplexity": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 1.0
+      },
+      "last": {
+        "step": 100,
+        "value": 2.9118542671203613
+      },
+      "last10_mean": 2.876252818107605
+    },
+    "actor/bad_grads_count": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.0
+      },
+      "last": {
+        "step": 100,
+        "value": 0.0
+      },
+      "last10_mean": 0.0
+    },
+    "critic/bad_grads_count": {
+      "count": 100,
+      "first": {
+        "step": 1,
+        "value": 0.0
+      },
+      "last": {
+        "step": 100,
+        "value": 0.0
+      },
+      "last10_mean": 0.0
+    }
+  }
+}

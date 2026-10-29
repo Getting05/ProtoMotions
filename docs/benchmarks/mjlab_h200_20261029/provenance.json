@@ -1,0 +1,192 @@
+{
+  "repo": "/data/workspace/ProtoMotions",
+  "commit": "21be04e3c4d6a256f0c4f32ed016e711c6822377",
+  "branch": "codex/mjlab-h200",
+  "scripts_sha256": {
+    "benchmark_train.py": "29937c2d57c8c07bb9ea9d321b0f1886d77330ead2f59f11321b79f03e280c49",
+    "run_guarded.py": "ac84273aa0cba23dc4f0082fb9138a5517a7d1981e5c12c213577e5bc75c08d6",
+    "prepare_subset.py": "a1cb2efe44331386cf5b6b7a3da89fadb2f86d7e80c347f024b3b0816d69f735",
+    "inspect_data.py": "9716070191ae02d7dc3c8e1b5f7996cc21a68d8a65cc85b42130fd91f7f22eb4",
+    "analyze_runs.py": "e2c7e4114b77df4b83baf552997b33259b403143431cc65c0624bf1f497e2293",
+    "verify_checkpoints.py": "f0a5ad2afa48c7a711537b6cb9489284aeac865481b9d241c785f47f84d65ec3",
+    "plot_results.py": "ea7997d5d7d5c0b6ec95cc7624728d53ed7327b46ef733027eb14ed0261025e1",
+    "extract_training_metrics.py": "616f3e83f80ee6f4c16a8f729f22755db3c772a26b5a0015c666179c127c0034",
+    "provenance.py": "129ebe1ebbea8a891e404c0bb7a688751736edb2de0510d737028441853d4f9c"
+  },
+  "dependency_lock_sha256": "0396cdbd0286ad7b3ea4de4dc32d05bc07ba59d4f3246dd8ea7479081ef7a8cb",
+  "guards": {
+    "torch_budget_GiB_per_process": 3,
+    "single_minimum_free_GiB": 8,
+    "final_dual_minimum_free_GiB": 4,
+    "monitor_period_seconds": 1,
+    "only_own_process_group_signalled": true,
+    "gpu_process_memory_not_exposed_by_host": true
+  },
+  "early_stops": {
+    "mjlab_astro512_dual256_20261029": {
+      "returncode": -15,
+      "abort_reason": "GPU 2 memory growth above 4608 MiB",
+      "seconds": 106.72627606699825,
+      "final_gpus": {
+        "0": {
+          "total": 143771,
+          "used": 129729,
+          "free": 13428,
+          "util": 0
+        },
+        "1": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        },
+        "2": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        },
+        "3": {
+          "total": 143771,
+          "used": 129729,
+          "free": 13428,
+          "util": 0
+        },
+        "4": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        },
+        "5": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        },
+        "6": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        },
+        "7": {
+          "total": 143771,
+          "used": 129731,
+          "free": 13426,
+          "util": 0
+        }
+      }
+    },
+    "mjlab_astro512_dual256_v2_20261029": {
+      "returncode": -15,
+      "abort_reason": "GPU 3 memory growth above 5120 MiB",
+      "seconds": 47.586133260978386,
+      "final_gpus": {
+        "0": {
+          "total": 143771,
+          "used": 5491,
+          "free": 137666,
+          "util": 0
+        },
+        "1": {
+          "total": 143771,
+          "used": 4565,
+          "free": 138592,
+          "util": 0
+        },
+        "2": {
+          "total": 143771,
+          "used": 4563,
+          "free": 138594,
+          "util": 0
+        },
+        "3": {
+          "total": 143771,
+          "used": 4563,
+          "free": 138594,
+          "util": 0
+        },
+        "4": {
+          "total": 143771,
+          "used": 4565,
+          "free": 138592,
+          "util": 0
+        },
+        "5": {
+          "total": 143771,
+          "used": 4565,
+          "free": 138592,
+          "util": 0
+        },
+        "6": {
+          "total": 143771,
+          "used": 4565,
+          "free": 138592,
+          "util": 0
+        },
+        "7": {
+          "total": 143771,
+          "used": 4565,
+          "free": 138592,
+          "util": 0
+        }
+      }
+    },
+    "mjlab_astro512_dual256_v3_20261029": {
+      "returncode": -15,
+      "abort_reason": "GPU 3 reference-corrected memory growth above 5120 MiB",
+      "seconds": 81.75281353999162,
+      "final_gpus": {
+        "0": {
+          "total": 143771,
+          "used": 124067,
+          "free": 19090,
+          "util": 0
+        },
+        "1": {
+          "total": 143771,
+          "used": 123025,
+          "free": 20132,
+          "util": 0
+        },
+        "2": {
+          "total": 143771,
+          "used": 123759,
+          "free": 19398,
+          "util": 2
+        },
+        "3": {
+          "total": 143771,
+          "used": 124161,
+          "free": 18996,
+          "util": 0
+        },
+        "4": {
+          "total": 143771,
+          "used": 124161,
+          "free": 18996,
+          "util": 0
+        },
+        "5": {
+          "total": 143771,
+          "used": 123025,
+          "free": 20132,
+          "util": 0
+        },
+        "6": {
+          "total": 143771,
+          "used": 123025,
+          "free": 20132,
+          "util": 0
+        },
+        "7": {
+          "total": 143771,
+          "used": 124161,
+          "free": 18996,
+          "util": 0
+        }
+      }
+    }
+  }
+}

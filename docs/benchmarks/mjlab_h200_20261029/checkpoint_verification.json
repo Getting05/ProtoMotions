@@ -1,0 +1,24 @@
+{
+  "mjlab_astro512_single256_20261029": {
+    "epoch": 100,
+    "step_count": 819200,
+    "all_checkpoint_tensors_finite": true,
+    "critic_optimizer_step_min": 800.0,
+    "critic_optimizer_step_max": 800.0,
+    "training_checkpoint": "/data/workspace/ProtoMotions/results/mjlab_astro512_single256_20261029/last.ckpt",
+    "training_bytes": 212585946,
+    "inference_checkpoint": "/data/workspace/ProtoMotions/results/mjlab_astro512_single256_20261029/inference_last.ckpt",
+    "inference_bytes": 78318269
+  },
+  "mjlab_astro512_dual256_budget4_20261029": {
+    "epoch": 100,
+    "step_count": 1638400,
+    "all_checkpoint_tensors_finite": true,
+    "critic_optimizer_step_min": 800.0,
+    "critic_optimizer_step_max": 800.0,
+    "training_checkpoint": "/data/workspace/ProtoMotions/results/mjlab_astro512_dual256_budget4_20261029/last.ckpt",
+    "training_bytes": 201574958,
+    "inference_checkpoint": "/data/workspace/ProtoMotions/results/mjlab_astro512_dual256_budget4_20261029/inference_last.ckpt",
+    "inference_bytes": 78318269
+  }
+}
