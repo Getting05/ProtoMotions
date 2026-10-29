@@ -490,8 +490,14 @@ def test_steering_control_reset_step_context_and_marker_state_are_deterministic(
     env.progress_buf[:] = torch.tensor([1, 2])
     control.step()
 
-    assert torch.allclose(control._prev_root_pos, torch.tensor([[1.0, 0.0, 0.9], [4.0, 0.0, 0.9]]))
+    # step() runs after physics: a periodic command update must preserve the
+    # completed displacement, rather than resetting env 1's history to x=4.
+    assert torch.allclose(control._prev_root_pos, torch.tensor([[1.0, 0.0, 0.9], [3.0, 0.0, 0.9]]))
     assert torch.allclose(control._curr_root_pos, torch.tensor([[1.5, 0.0, 0.9], [4.0, 0.0, 0.9]]))
+    assert torch.allclose(
+        control._curr_root_pos - control._prev_root_pos,
+        torch.tensor([[0.5, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+    )
     assert torch.equal(control._heading_change_steps, torch.tensor([2, 4]))
     marker_state = control.get_markers_state()
     assert set(marker_state) == {"movement_markers", "facing_markers"}

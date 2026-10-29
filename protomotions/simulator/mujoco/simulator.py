@@ -17,7 +17,6 @@ import torch
 
 log = logging.getLogger(__name__)
 
-from protomotions.assets import resolve_asset_root
 from protomotions.simulator.base_simulator.config import (
     MarkerState,
     ProjectileConfig,
@@ -33,11 +32,44 @@ from protomotions.simulator.base_simulator.simulator_state import (
     StateConversion,
 )
 from protomotions.simulator.mujoco.config import MujocoSimulatorConfig
+from protomotions.simulator.mujoco.keyboard import MujocoViewerKeyboard
+from protomotions.simulator.mujoco.recording import recording_dimensions, render_viewport
+
+
+# Names accepted by MujocoSimParams.integrator
+_INTEGRATORS = {
+    "euler": mujoco.mjtIntegrator.mjINT_EULER,
+    "rk4": mujoco.mjtIntegrator.mjINT_RK4,
+    "implicit": mujoco.mjtIntegrator.mjINT_IMPLICIT,
+    "implicitfast": mujoco.mjtIntegrator.mjINT_IMPLICITFAST,
+}
 
 
 def _to_torch_f32(arr: np.ndarray) -> torch.Tensor:
     """Convert numpy array to float32 torch tensor."""
     return torch.from_numpy(arr.astype(np.float32))
+
+
+# A free joint's qvel[3:6] is angular velocity in the BODY frame, while its qvel[0:3]
+# is linear velocity in the world frame. ProtoMotions' root_ang_vel is world-frame, so
+# every read and write of qvel[3:6] goes through these two helpers.
+def _world_to_body(quat_wxyz: np.ndarray, vec: np.ndarray) -> np.ndarray:
+    """Express a world-frame vector in the frame of a body oriented by quat_wxyz."""
+    quat = np.asarray(quat_wxyz, dtype=np.float64)
+    inverse = quat * np.array([1.0, -1.0, -1.0, -1.0]) / np.linalg.norm(quat)
+    out = np.zeros(3)
+    mujoco.mju_rotVecQuat(out, np.asarray(vec, dtype=np.float64), inverse)
+    return out
+
+
+def _body_to_world(quat_wxyz: np.ndarray, vec: np.ndarray) -> np.ndarray:
+    """Express a body-frame vector in the world frame, for a body oriented by quat_wxyz."""
+    quat = np.asarray(quat_wxyz, dtype=np.float64)
+    out = np.zeros(3)
+    mujoco.mju_rotVecQuat(
+        out, np.asarray(vec, dtype=np.float64), quat / np.linalg.norm(quat)
+    )
+    return out
 
 
 class MujocoSimulator(Simulator):
@@ -62,6 +94,14 @@ class MujocoSimulator(Simulator):
         scene_lib,
     ) -> None:
         """Initialize MuJoCo simulator shell."""
+        if (
+            config.domain_randomization is not None
+            and config.domain_randomization.body_mass is not None
+        ):
+            raise NotImplementedError(
+                "MuJoCo does not support body-mass domain randomization."
+            )
+
         assert device.type == "cpu", "MuJoCo simulator only supports CPU device"
         assert config.num_envs == 1, "MuJoCo simulator only supports num_envs=1"
         assert scene_lib.num_scenes() == 0, "MuJoCo simulator does not support scenes"
@@ -79,6 +119,7 @@ class MujocoSimulator(Simulator):
         self.data: Optional[mujoco.MjData] = None
         self.viewer = None
         self._viewer_initialized = False
+        self._viewer_keyboard = MujocoViewerKeyboard()
 
         # Cached control parameters
         self._kp = None  # [num_dofs] stiffness in common DOF order
@@ -282,9 +323,7 @@ class MujocoSimulator(Simulator):
     def _create_simulation(self) -> None:
         """Create the MuJoCo simulation environment."""
         # Load MJCF model
-        asset_root = resolve_asset_root(self.robot_config.asset.asset_root)
-        asset_file = self.robot_config.asset.asset_file_name
-        asset_path = os.path.join(asset_root, asset_file)
+        asset_path = self._get_robot_asset_path()
 
         # MJCF injection below needs _proj_config before _init_projectiles runs
         self._resolve_proj_config()
@@ -300,11 +339,27 @@ class MujocoSimulator(Simulator):
             f"MuJoCo timestep: {self.model.opt.timestep:.4f}s ({self.config.sim.fps}Hz)"
         )
 
+        # Integrator: None keeps whatever the MJCF's <option> chose. getattr
+        # because sim params pickled before this field existed lack it.
+        integrator = getattr(self.config.sim, "integrator", None)
+        if integrator is not None:
+            if integrator not in _INTEGRATORS:
+                raise ValueError(
+                    f"Unknown MuJoCo integrator '{integrator}'; "
+                    f"expected one of {sorted(_INTEGRATORS)}"
+                )
+            self.model.opt.integrator = _INTEGRATORS[integrator]
+        integrator_name = mujoco.mjtIntegrator(self.model.opt.integrator).name
+        print(f"MuJoCo integrator: {integrator_name}")
+
         # Zero passive forces from MJCF (we handle PD control via actuators)
         self._zero_passive_forces()
 
         # Override armature and frictionloss from robot config
         self._override_joint_properties()
+
+        # ctrl must be the joint torque in every control mode
+        self._neutralize_actuator_gear()
 
         # Build actuator-to-DOF mapping
         self._build_actuator_mapping()
@@ -422,6 +477,62 @@ class MujocoSimulator(Simulator):
                     f"frictionloss -> 0.0"
                 )
 
+    def _neutralize_actuator_gear(self) -> None:
+        """Set every joint actuator's gear to 1 so that ctrl is the joint torque.
+
+        MJCF motors may carry a gear ratio (SMPL and SMPL-X use 500, SOMA23 and
+        AMP 50-250), and MuJoCo applies gear * actuator force to the joint.
+        ProtoMotions writes joint torques straight into ctrl, and the position
+        actuators built in _configure_actuators_for_pd compute the PD torque
+        themselves, so a non-unit gear multiplies every torque and its effort
+        limit by the gear, and also pulls a position actuator toward
+        target / gear instead of target. Any ctrl or force range the MJCF
+        declares is rescaled so it keeps the same meaning in joint units.
+
+        Only a positive scalar gear on a hinge or slide joint can be reset this
+        way, so anything else is rejected rather than guessed at.
+        """
+        is_joint = self.model.actuator_trntype == mujoco.mjtTrn.mjTRN_JOINT
+        for act_idx in np.flatnonzero(is_joint):
+            self._check_resettable_gear(act_idx)
+
+        gear = self.model.actuator_gear[:, 0].copy()
+        to_fix = np.flatnonzero(is_joint & (gear != 1.0))
+        if to_fix.size == 0:
+            return
+
+        for act_idx in to_fix:
+            g = gear[act_idx]
+            self.model.actuator_ctrlrange[act_idx] *= g
+            self.model.actuator_forcerange[act_idx] *= g
+        self.model.actuator_gear[to_fix] = 0.0
+        self.model.actuator_gear[to_fix, 0] = 1.0
+        print(
+            f"  Reset actuator gear to 1 on {to_fix.size} actuators "
+            f"(MJCF gears {sorted(set(gear[to_fix].tolist()))})"
+        )
+
+    def _check_resettable_gear(self, act_idx: int) -> None:
+        """Reject a joint actuator whose gear cannot be reset to a scalar 1."""
+        name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, act_idx)
+        # A Python int, not numpy's: from mujoco 3.16 on, `member == numpy_int`
+        # is False for an mjtJoint member, and that is the order `in` compares.
+        joint_type = int(self.model.jnt_type[self.model.actuator_trnid[act_idx, 0]])
+        if joint_type not in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
+            raise ValueError(
+                f"MuJoCo actuator '{name}' drives a "
+                f"{mujoco.mjtJoint(joint_type).name} joint. This backend supports "
+                "actuators on hinge and slide joints only: a ball joint's gear is a "
+                "3D torque axis, not a scalar ratio, so it cannot be reset to 1."
+            )
+        gear = self.model.actuator_gear[act_idx, 0]
+        if gear <= 0.0:
+            raise ValueError(
+                f"MuJoCo actuator '{name}' has gear {gear:g}. This backend writes "
+                "joint torques into ctrl and needs a positive gear: a zero gear "
+                "disconnects the actuator, and a negative one flips the torque's sign."
+            )
+
     def _build_actuator_mapping(self) -> None:
         """Build mapping from sim DOF index to MuJoCo actuator index.
 
@@ -491,7 +602,8 @@ class MujocoSimulator(Simulator):
             biastype = mjBIAS_AFFINE (1)
 
         After this, data.ctrl[i] = target_position for actuator i.
-        MuJoCo handles the PD at every substep internally.
+        MuJoCo handles the PD at every substep internally. This relies on
+        _neutralize_actuator_gear having set the gear to 1.
         """
         from protomotions.robot_configs.base import ControlType
 
@@ -606,9 +718,14 @@ class MujocoSimulator(Simulator):
             self.data,
             show_left_ui=False,
             show_right_ui=False,
-            key_callback=self._mujoco_key_callback,
+            key_callback=self._viewer_keyboard.on_key,
         )
         self._viewer_initialized = True
+        self._viewer_keyboard.capture(self.viewer)
+        self.user_interface.register_key(
+            ".", owner="mujoco", description="Toggle task / native viewer keys",
+            on_press=self._viewer_keyboard.toggle_native,
+        )
         # Ensure viewer is closed on exit to prevent hangs
         atexit.register(self._close_viewer)
 
@@ -619,7 +736,10 @@ class MujocoSimulator(Simulator):
         self.viewer.cam.trackbodyid = 1  # Track pelvis (first non-world body)
         self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-        log.info("MuJoCo passive viewer launched (tracking body 1)")
+        log.info(
+            "MuJoCo viewer: click the viewer to use task keys. "
+            "Press '.' to toggle native viewer shortcuts."
+        )
 
     @staticmethod
     def _marker_radius(size: str) -> float:
@@ -751,7 +871,7 @@ class MujocoSimulator(Simulator):
             self.data.qpos[7 : 7 + self._num_actuated_dofs] = dof_pos
 
             self.data.qvel[0:3] = root_vel
-            self.data.qvel[3:6] = root_ang_vel
+            self.data.qvel[3:6] = _world_to_body(root_rot, root_ang_vel)
             self.data.qvel[6 : 6 + self._num_actuated_dofs] = dof_vel
         else:
             self.data.qpos[: self._num_actuated_dofs] = dof_pos
@@ -777,13 +897,19 @@ class MujocoSimulator(Simulator):
           - Explicit: We recompute PD torques at each substep (1kHz), matching
             RoboJuDo and real hardware PD loops.
 
-        For TORQUE/PROPORTIONAL modes, torques are applied once and held constant.
+        For TORQUE/PROPORTIONAL modes, torques are applied once and held constant
+        without latency randomization; with latency enabled, they are refreshed
+        at each substep to interpolate the action.
         """
         from protomotions.robot_configs.base import ControlType
 
+        self._poll_keyboard_events()
+        latency_enabled = self._max_action_latency_ms > 0.0
+
         # Apply control (base class calls _apply_simulator_pd_targets
         # or _apply_simulator_torques which write to data.ctrl)
-        self._apply_control()
+        if not latency_enabled:
+            self._apply_control()
 
         use_implicit_pd = getattr(self.config, "use_implicit_pd", True)
         use_explicit_substep_pd = (
@@ -794,12 +920,16 @@ class MujocoSimulator(Simulator):
         if use_explicit_substep_pd:
             # Explicit PD: recompute torques from current state at each substep
             for _ in range(self.decimation):
+                if latency_enabled:
+                    self._apply_control()
                 self._recompute_explicit_pd()
                 # print("Recomputed explicit PD torques")
                 mujoco.mj_step(self.model, self.data)
         else:
             # Implicit PD (position actuators) or TORQUE/PROPORTIONAL mode
             for _ in range(self.decimation):
+                if latency_enabled:
+                    self._apply_control()
                 mujoco.mj_step(self.model, self.data)
 
         self._step_count += 1
@@ -807,6 +937,12 @@ class MujocoSimulator(Simulator):
         # Periodic state monitoring
         if self._step_count % 100 == 1:
             self._print_state_debug()
+
+    def _poll_keyboard_events(self) -> None:
+        """Forward queued application keys before the next physics step."""
+        for key in self._viewer_keyboard.drain_presses():
+            if key == "." or not self._viewer_keyboard.native:
+                self.user_interface.handle_key_press(key)
 
     def _print_state_debug(self) -> None:
         """Print state summary for debugging."""
@@ -852,7 +988,7 @@ class MujocoSimulator(Simulator):
         ang_vel = angular_velocity[0].cpu().numpy()
 
         self.data.qvel[0:3] += lin_vel
-        self.data.qvel[3:6] += ang_vel
+        self.data.qvel[3:6] += _world_to_body(self.data.qpos[3:7], ang_vel)
 
     def _get_simulator_root_state(
         self, env_ids: Optional[torch.Tensor] = None
@@ -862,7 +998,7 @@ class MujocoSimulator(Simulator):
             root_pos = self.data.qpos[0:3].copy()
             root_rot = self.data.qpos[3:7].copy()
             root_vel = self.data.qvel[0:3].copy()
-            root_ang_vel = self.data.qvel[3:6].copy()
+            root_ang_vel = _body_to_world(root_rot, self.data.qvel[3:6])
         else:
             root_pos = np.zeros(3, dtype=np.float32)
             root_rot = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
@@ -885,9 +1021,20 @@ class MujocoSimulator(Simulator):
         body_pos = self.data.xpos[1 : 1 + nb, :].copy()
         body_rot = self.data.xquat[1 : 1 + nb, :].copy()
 
-        # cvel is [ang_vel(3), lin_vel(3)]
-        body_ang_vel = self.data.cvel[1 : 1 + nb, 0:3].copy()
-        body_vel = self.data.cvel[1 : 1 + nb, 3:6].copy()
+        # cvel is expressed about the kinematic tree's COM, not each body.
+        # XBODY gives velocity at xpos (not the inertial COM), in world axes.
+        body_velocity = np.empty((nb, 6), dtype=np.float64)
+        for index in range(nb):
+            mujoco.mj_objectVelocity(
+                self.model,
+                self.data,
+                mujoco.mjtObj.mjOBJ_XBODY,
+                index + 1,
+                body_velocity[index],
+                0,
+            )
+        body_ang_vel = body_velocity[:, :3]
+        body_vel = body_velocity[:, 3:]
 
         return RobotState(
             rigid_body_pos=_to_torch_f32(body_pos).unsqueeze(0),
@@ -1096,7 +1243,9 @@ class MujocoSimulator(Simulator):
             self.data.qpos[qp : qp + 3] = positions[i].cpu().numpy()
             self.data.qpos[qp + 3 : qp + 7] = rot_wxyz[i].cpu().numpy()
             self.data.qvel[qv : qv + 3] = velocities[i].cpu().numpy()
-            self.data.qvel[qv + 3 : qv + 6] = ang_velocities[i].cpu().numpy()
+            self.data.qvel[qv + 3 : qv + 6] = _world_to_body(
+                rot_wxyz[i].cpu().numpy(), ang_velocities[i].cpu().numpy()
+            )
 
             # Toggle collisions based on whether this is a hide or throw
             z_pos = positions[i, 2].item()
@@ -1110,27 +1259,24 @@ class MujocoSimulator(Simulator):
 
         mujoco.mj_forward(self.model, self.data)
 
-    def _mujoco_key_callback(self, keycode: int) -> None:
-        """Handle ASCII keyboard events from MuJoCo passive viewer.
-
-        MuJoCo special keys use non-ASCII key codes that do not correspond to
-        the string keys registered in ``UserInterface``. Ignore those codes so a
-        special key cannot be normalized into an unrelated Unicode character.
-        """
-        if keycode < 0 or keycode > 127:
-            return
-        self.user_interface.handle_key_event(chr(keycode), pressed=True)
-
     def _write_viewport_to_file(self, file_name: str) -> None:
-        """Render current view to file."""
-        renderer = mujoco.Renderer(self.model, height=480, width=640)
-        renderer.update_scene(self.data)
-        pixels = renderer.render()
+        """Save a frame using fixed clip dimensions and the live viewer state."""
+        viewer = self.viewer if self._viewer_initialized else None
+        lock = (
+            viewer.lock()
+            if viewer is not None and hasattr(viewer, "lock")
+            else nullcontext()
+        )
+        with lock:
+            # Encoders require a fixed frame size, even if the window resizes.
+            if self._user_recording_frame == 0:
+                self._recording_viewport_size = recording_dimensions(viewer)
+            width, height = self._recording_viewport_size
+            pixels = render_viewport(self.model, self.data, viewer, width, height)
 
         import matplotlib.pyplot as plt
 
         plt.imsave(file_name, pixels)
-        renderer.close()
 
     def _init_camera(self) -> None:
         """Initialize camera position and orientation."""
@@ -1198,6 +1344,6 @@ class MujocoSimulator(Simulator):
             # interactions that switch the camera mode don't lose the robot.
             self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             self.viewer.cam.trackbodyid = 1
-            self.viewer.sync()
+            self._viewer_keyboard.sync(self.viewer)
 
         super().render()

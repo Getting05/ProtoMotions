@@ -3,6 +3,7 @@
 
 """Unit tests for train_agent.py helper paths."""
 
+import importlib
 import json
 import os
 import runpy
@@ -37,6 +38,10 @@ class _TinyFabricConfig:
 
 
 def _install_train_agent_import_fakes(monkeypatch):
+    # The CLI package imports evaluator classes. Load them with real Lightning
+    # before replacing the logger module, so standalone runs match full-suite
+    # collection and do not depend on which test imported the package first.
+    importlib.import_module("protomotions.agents.evaluators.gpc_prior_cli")
     simulator_imports = ModuleType("protomotions.utils.simulator_imports")
     simulator_imports.import_simulator_before_torch = lambda simulator: None
     monkeypatch.setitem(
@@ -103,6 +108,14 @@ def _load_train_agent_globals(monkeypatch, tmp_path):
         ],
     )
     return runpy.run_path(TRAIN_AGENT_PATH, run_name="train_agent_unit")
+
+
+def _main_args(module, **overrides):
+    # Keep parser defaults for runtime-only flags (guard, eval and video), as a
+    # real invocation does, while each test overrides only its scenario fields.
+    args = argparse.Namespace(**vars(module["args"]))
+    vars(args).update(overrides)
+    return args
 
 
 def test_train_agent_parser_and_bool_helpers(monkeypatch, tmp_path):
@@ -414,6 +427,34 @@ def test_detect_checkpoint_mode_handles_fresh_warm_start_and_resume(
         detect_checkpoint_mode(SimpleNamespace(checkpoint=None), missing_config_dir)
 
 
+def test_resume_keeps_kit_thread_count_given_on_the_command_line(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_train_agent_globals(monkeypatch, tmp_path)
+    detect_checkpoint_mode = module["detect_checkpoint_mode"]
+    resume_dir = tmp_path / "resume"
+    resume_dir.mkdir()
+    (resume_dir / "last.ckpt").write_text("checkpoint")
+
+    def resume(saved, cli):
+        (resume_dir / "config.yaml").write_text(
+            json.dumps({"batch_size": 64, "kit_thread_count": saved})
+        )
+        args = SimpleNamespace(checkpoint=None, batch_size=8, kit_thread_count=cli)
+        assert detect_checkpoint_mode(args, resume_dir)[0] == "resume"
+        assert args.batch_size == 64
+        return args.kit_thread_count
+
+    # The fix for a run that starts aborting at startup is to add the flag to the
+    # resume command; the saved None from the original launch must not erase it.
+    assert resume(saved=None, cli=1) == 1
+    assert resume(saved=4, cli=1) == 1
+    # Without the flag, the saved value is used as before.
+    assert resume(saved=1, cli=None) == 1
+    assert resume(saved=None, cli=None) is None
+
+
 def test_load_experiment_module_loads_file_and_rejects_missing_paths(
     monkeypatch,
     tmp_path,
@@ -690,7 +731,8 @@ def test_main_create_config_only_builds_configs_and_exits_before_training(
     module = _load_train_agent_globals(monkeypatch, tmp_path)
     main_globals = module["main"].__globals__
     config = _TinyConfig(value=11)
-    args = SimpleNamespace(
+    args = _main_args(
+        module,
         experiment_name="main-config-only",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=True,
@@ -793,7 +835,8 @@ def test_main_config_only_registers_custom_args_and_applies_cli_overrides(
     override_calls = []
     config = _TinyConfig(value=11)
     motion_lib_config = MotionLibConfig(motion_file="motions.pt")
-    args = SimpleNamespace(
+    args = _main_args(
+        module,
         experiment_name="main-config-overrides",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=True,
@@ -883,7 +926,8 @@ def test_main_fresh_training_path_wires_fabric_components_agent_and_saves(
     module = _load_train_agent_globals(monkeypatch, tmp_path)
     main_globals = module["main"].__globals__
     calls = []
-    args = SimpleNamespace(
+    args = _main_args(
+        module,
         experiment_name="fresh",
         experiment_path=str(tmp_path / "experiment.py"),
         create_config_only=False,
@@ -1165,7 +1209,8 @@ def test_main_resume_isaaclab_uses_saved_configs_launcher_and_skip_flag(
         resume_dir / "resolved_configs.pt",
     )
 
-    args = SimpleNamespace(
+    args = _main_args(
+        module,
         experiment_name="resume",
         experiment_path=str(tmp_path / "ignored_experiment.py"),
         create_config_only=False,

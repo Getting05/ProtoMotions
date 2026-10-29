@@ -840,6 +840,7 @@ def test_base_env_cached_body_ids_and_clean_context_without_history():
     assert ctx.noisy_historical is None
     assert ctx.previous_action is None
     assert ctx.previous_processed_action is None
+    assert ctx.current_action is env._current_raw_action
     assert ctx.current_processed_action is env._current_processed_action
     assert BaseEnv.context.fget(env) is ctx
     assert env.control_manager.populate_calls[-1] is ctx
@@ -1413,6 +1414,55 @@ def test_base_env_motion_manager_markers_state_save_restore_and_close(monkeypatc
     assert env.simulator.closed is True
 
 
+class _ContactCachingSimulator(_FakeSimulator):
+    """Fake backend that remembers contacts and records the call order."""
+
+    def __init__(self, events, **kwargs):
+        super().__init__(**kwargs)
+        self.events = events
+
+    def flush_contact_cache(self):
+        self.events.append("flush_contact_cache")
+
+    def reset_envs(self, new_states, new_object_states=None, env_ids=None):
+        self.events.append("reset_envs")
+        super().reset_envs(new_states, new_object_states, env_ids)
+
+
+def test_restore_state_flushes_contacts_before_writing_state_back():
+    # PhysX keeps each robot's contacts from the last substep, and a state write
+    # does not clear them. If the flush ran after the write-back (or not at all),
+    # robots restored into a grounded pose could be launched on the next substep.
+    env = _make_env(scenes=1)
+    events = []
+    env.simulator = _ContactCachingSimulator(events, num_envs=env.num_envs)
+    env.simulator.config._target_ = "fake.IsaacLab"
+    snapshot = BaseEnv.save_state(env)
+
+    BaseEnv.restore_state(env, snapshot)
+
+    assert events == ["flush_contact_cache", "reset_envs"]
+    new_states, new_object_states, env_ids = env.simulator.reset_calls[-1]
+    assert new_states is snapshot["robot_state"]
+    assert new_object_states is snapshot["object_state"]
+    assert torch.equal(env_ids, torch.arange(env.num_envs))
+
+
+def test_restore_state_works_with_a_simulator_that_cannot_flush():
+    env = _make_env()
+    assert not hasattr(env.simulator, "flush_contact_cache")
+    env.simulator.config._target_ = "fake.IsaacLab"
+    env.progress_buf[:] = torch.tensor([4, 5, 6])
+    snapshot = BaseEnv.save_state(env)
+    env.progress_buf.zero_()
+
+    BaseEnv.restore_state(env, snapshot)
+
+    assert len(env.simulator.reset_calls) == 1
+    assert env.simulator.reset_calls[0][0] is snapshot["robot_state"]
+    assert torch.equal(env.progress_buf, torch.tensor([4, 5, 6]))
+
+
 def test_base_env_constructor_initializes_lightweight_dependencies(monkeypatch):
     class _ConstructedMotionManager:
         def __init__(self, **kwargs):
@@ -1593,3 +1643,37 @@ def test_apply_motion_weights_to_scene_weights_loads_expected_checkpoint(tmp_pat
         )
         is None
     )
+
+
+def test_base_env_step_detaches_actions_before_persisting_them():
+    """Regression for the interactive-eval GPU leak.
+
+    step() records the raw and processed actions with ``buffer[:] = x``. That is a
+    ``copy_``, and ``copy_`` from a tensor that carries a graph turns the
+    previously grad-free buffer into one that requires grad (a ``CopyBackwards``
+    node) -- which pins the entire action graph for the life of the persistent
+    buffer, so an eval loop that steps with graph-carrying actions grows its GPU
+    memory every step. step() must ``.detach()`` before storing.
+
+    This steps a grad-carrying action through the real step()/_process_action path
+    (post_physics_step and get_obs stubbed, mirroring the step test above) and
+    requires the persisted buffers to come back detached. It fails on the pre-fix
+    code (requires_grad True, grad_fn a CopyBackwards) and passes once the stores
+    detach -- so it guards the fix even for a caller that is NOT under
+    torch.no_grad()."""
+    env = _make_env()
+    env.config.action_config = {
+        "fn": lambda action: {"processed_action": action + 1.0},
+    }
+    env.post_physics_step = lambda: None
+    env.get_obs = lambda: {}
+
+    action = torch.ones(3, 2, requires_grad=True) * 2.0
+    assert action.grad_fn is not None  # the action genuinely carries a graph
+
+    BaseEnv.step(env, action)
+
+    for name in ("_current_raw_action", "_current_processed_action"):
+        buf = getattr(env, name)
+        assert not buf.requires_grad, f"{name} still requires grad -> autograd graph leak"
+        assert buf.grad_fn is None, f"{name} kept grad_fn {buf.grad_fn} -> autograd graph leak"

@@ -25,7 +25,8 @@ class P2DeployEnv(BaseEnv):
         update_scene = self.simulator._scene.update
         def update_and_sample(dt, *update_args, **update_kwargs):
             result = update_scene(dt, *update_args, **update_kwargs)
-            if not self._deploy_resetting and self._deploy_bank is not None:
+            if (not self._deploy_resetting and self._deploy_bank is not None
+                    and not getattr(self.simulator, '_flushing_contact_cache', False)):
                 guard = getattr(self.simulator, '_physics_guard', None)
                 if guard is None:
                     self._sample_deploy_sensors()
@@ -35,7 +36,8 @@ class P2DeployEnv(BaseEnv):
                     recover = guard.inspect_and_recover
                     def recover_and_sample(snapshot, substep):
                         result = recover(snapshot, substep)
-                        if substep >= 0 and not self._deploy_resetting:
+                        if (substep >= 0 and not self._deploy_resetting
+                                and not getattr(self.simulator, '_flushing_contact_cache', False)):
                             self._sample_deploy_sensors(guard.invalid)
                         return result
                     guard.inspect_and_recover = recover_and_sample
@@ -80,12 +82,40 @@ class P2DeployEnv(BaseEnv):
             self._deploy_bank.commit()
         return super().post_physics_step()
 
-    def reset_envs(self, *args, **kwargs):
+    def reset(self, *args, **kwargs):
+        was_resetting = self._deploy_resetting
         self._deploy_resetting = True
         try:
-            return super().reset_envs(*args, **kwargs)
+            return super().reset(*args, **kwargs)
         finally:
-            self._deploy_resetting = False
+            self._deploy_resetting = was_resetting
+
+    def save_state(self):
+        snapshot = super().save_state()
+        snapshot['p2_deploy_sensors'] = (None if self._deploy_bank is None
+                                          else self._deploy_bank.state_dict())
+        return snapshot
+
+    def restore_state(self, snapshot):
+        if 'p2_deploy_sensors' not in snapshot:
+            raise ValueError('Evaluation snapshot requires P2 deployment sensor state')
+        was_resetting = self._deploy_resetting
+        self._deploy_resetting = True
+        try:
+            # The parent's contact-cache flush and pose write are maintenance,
+            # not 200 Hz IMU samples. Restore the finite-difference state and
+            # 50 Hz history after those writes, without re-seeding either.
+            super().restore_state(snapshot)
+            sensor_state = snapshot['p2_deploy_sensors']
+            if sensor_state is None:
+                self._deploy_bank = None
+            else:
+                if self._deploy_bank is None:
+                    self._deploy_bank = P2DeploySensorBank(
+                        self.num_envs, self.config.num_state_history_steps, self.device)
+                self._deploy_bank.load_state_dict(sensor_state)
+        finally:
+            self._deploy_resetting = was_resetting
 
     def get_state_dict(self):
         state = super().get_state_dict()

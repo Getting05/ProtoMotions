@@ -277,10 +277,12 @@ def main():
         -3
     ]  # e.g., "isaacgym" from "protomotions.simulator.isaacgym.simulator.IsaacGymSimulator"
 
+    train_sim_params = None
     if args.simulator != current_simulator:
         log.info(
             f"Switching simulator from '{current_simulator}' (training) to '{args.simulator}' (inference)"
         )
+        train_sim_params = simulator_config.sim
         from protomotions.simulator.factory import update_simulator_config_for_test
 
         simulator_config = update_simulator_config_for_test(
@@ -370,6 +372,13 @@ def main():
         prepare_video_motion(video_request, Path(args.video_request).parent)
         configure_video_inference(
             video_request, simulator_config, motion_lib_config, scene_lib_config, env_config
+        )
+
+    if train_sim_params is not None:
+        from protomotions.simulator.factory import warn_on_control_rate_change
+
+        warn_on_control_rate_change(
+            train_sim_params, simulator_config.sim, args.simulator
         )
 
     motion_lib_config.validate()

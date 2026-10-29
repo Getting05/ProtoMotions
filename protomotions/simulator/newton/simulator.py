@@ -1,12 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 import torch
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
-from protomotions.assets import resolve_asset_root
 from protomotions.simulator.base_simulator.simulator import Simulator
 from protomotions.simulator.base_simulator.config import (
     MarkerState,
@@ -30,6 +28,7 @@ from protomotions.simulator.newton.contact_utils import (
 from protomotions.simulator.base_simulator.utils import (
     get_friction_bucket_count,
     get_friction_table,
+    scale_inertia_for_mass_change,
 )
 from protomotions.simulator.newton.randomization_utils import (
     move_friction_tables_to_device,
@@ -156,7 +155,19 @@ class NewtonSimulator(Simulator):
         self.graph = None
         self.use_cuda_graph = False
 
-        if wp.get_device().is_cuda and wp.is_mempool_enabled(wp.get_device()):
+        warp_device = wp.get_device()
+        if not warp_device.is_cuda:
+            no_cuda_graph_reason = "Warp device is not CUDA"
+        elif not wp.is_mempool_enabled(warp_device):
+            no_cuda_graph_reason = "Warp memory pool is disabled"
+        elif self._max_action_latency_ms > 0.0:
+            no_cuda_graph_reason = (
+                "action latency randomization requires per-substep control updates"
+            )
+        else:
+            no_cuda_graph_reason = None
+
+        if no_cuda_graph_reason is None:
             print(f"[INFO] Using CUDA graph ({self.control_type.name})")
             self.use_cuda_graph = True
             zeros = torch.zeros(
@@ -180,7 +191,10 @@ class NewtonSimulator(Simulator):
                 self._simulate()
             self.graph = capture.graph
         else:
-            print(f"[INFO] {self.control_type.name} mode (no CUDA graph)")
+            print(
+                f"[INFO] {self.control_type.name} mode "
+                f"(no CUDA graph: {no_cuda_graph_reason})"
+            )
 
     def _create_envs(self) -> None:
         """Creates environments and loads robot assets.
@@ -188,9 +202,7 @@ class NewtonSimulator(Simulator):
         Follows the Newton G1 example pattern: configure joint properties
         on the builder BEFORE finalize, then use replicate() for multi-env.
         """
-        asset_root = resolve_asset_root(self.robot_config.asset.asset_root)
-        asset_file = self.robot_config.asset.asset_file_name
-        asset_path = os.path.join(asset_root, asset_file)
+        asset_path = self._get_robot_asset_path()
 
         print(f"Loading robot from: {asset_path}")
 
@@ -630,6 +642,47 @@ class NewtonSimulator(Simulator):
                 f"[INFO] Applied center of mass domain randomization to {len(body_indices)} body types"
             )
 
+        if "body_mass" in self._domain_randomization:
+            body_mass = self._domain_randomization["body_mass"]
+            mass_wp = self.robot_view.get_attribute("body_mass", self.model)
+            current_mass = wp.to_torch(mass_wp)
+            inertia_wp = self.robot_view.get_attribute("body_inertia", self.model)
+            current_inertia = wp.to_torch(inertia_wp)
+            link_name_to_idx = {
+                name: i for i, name in enumerate(self.robot_view.link_names)
+            }
+            num_buckets = body_mass["mass"].shape[0]
+            for idx, local_body_idx in enumerate(body_mass["body_indices"]):
+                body_name = self._body_names[local_body_idx]
+                link_idx = link_name_to_idx.get(body_name)
+                if link_idx is None:
+                    raise ValueError(
+                        f"Body mass randomization body '{body_name}' is not present in Newton."
+                    )
+                bucket_ids = torch.randint(
+                    0, num_buckets, (self.num_envs,), device=self.device
+                )
+                values = body_mass["mass"][bucket_ids, idx].to(current_mass.device)
+                if current_mass.ndim == 3:
+                    old_values = current_mass[:, 0, link_idx].clone()
+                    current_mass[:, 0, link_idx] = values
+                    current_inertia[:, 0, link_idx] = scale_inertia_for_mass_change(
+                        current_inertia[:, 0, link_idx], values / old_values
+                    )
+                else:
+                    old_values = current_mass[:, link_idx].clone()
+                    current_mass[:, link_idx] = values
+                    current_inertia[:, link_idx] = scale_inertia_for_mass_change(
+                        current_inertia[:, link_idx], values / old_values
+                    )
+
+            self.robot_view.set_attribute("body_mass", self.model, mass_wp)
+            self.robot_view.set_attribute("body_inertia", self.model, inertia_wp)
+            notify_flags |= SolverNotifyFlags.BODY_INERTIAL_PROPERTIES
+            print(
+                f"[INFO] Applied body mass domain randomization to {len(body_mass['body_indices'])} body types"
+            )
+
         # Notify solver of changes so MuJoCo updates its internal model
         if notify_flags != 0:
             self.solver.notify_model_changed(notify_flags)
@@ -746,6 +799,13 @@ class NewtonSimulator(Simulator):
         """Run physics simulation for one frame (decimation substeps)."""
         for _ in range(self.decimation):
             self.state_0.clear_forces()
+            if self._max_action_latency_ms > 0.0:
+                if self.control_type == ControlType.BUILT_IN_PD:
+                    self._apply_control()
+                else:
+                    actions = self._get_actions_for_physics_step()
+                    self._apply_newton_control(actions)
+                    self._advance_action_latency()
             if self.control_type == ControlType.PROPORTIONAL:
                 self._apply_pd_kernel(self.state_0)
             elif self.control_type == ControlType.TORQUE:
@@ -781,33 +841,11 @@ class NewtonSimulator(Simulator):
     def _physics_step(self) -> None:
         """Performs a physics simulation step."""
         # Update control targets before simulation
-        if self.control_type == ControlType.BUILT_IN_PD:
-            self._apply_control()
-        elif self.control_type == ControlType.PROPORTIONAL:
-            pd_tar = self._action_to_pd_targets(self._common_actions)
-            if (
-                self._domain_randomization is not None
-                and "action_noise" in self._domain_randomization
-            ):
-                pd_tar[
-                    ..., self._domain_randomization["action_noise"]["dof_indices"]
-                ] += self._domain_randomization["action_noise"]["action_noise"]
-            sim_targets = pd_tar[:, self.data_conversion.dof_convert_to_sim]
-            self._update_pd_targets(sim_targets)
-        elif self.control_type == ControlType.TORQUE:
-            torques = self._action_to_torque_targets(self._common_actions)
-            if (
-                self._domain_randomization is not None
-                and "action_noise" in self._domain_randomization
-            ):
-                torques[
-                    ..., self._domain_randomization["action_noise"]["dof_indices"]
-                ] += self._domain_randomization["action_noise"]["action_noise"]
-            torques = torch.clip(
-                torques, -self._torque_limits_common, self._torque_limits_common
-            )
-            sim_torques = torques[:, self.data_conversion.dof_convert_to_sim]
-            self._update_torques(sim_torques)
+        if self._max_action_latency_ms == 0.0:
+            if self.control_type == ControlType.BUILT_IN_PD:
+                self._apply_control()
+            else:
+                self._apply_newton_control(self._common_actions)
 
         # Run simulation
         if self.use_cuda_graph:
@@ -817,6 +855,41 @@ class NewtonSimulator(Simulator):
 
         self._update_contact_sensors()
         self.sim_time += self.frame_dt
+
+    def _apply_newton_control(self, actions: torch.Tensor) -> None:
+        """Update Newton's explicit control buffers for one action.
+
+        Mirrors the base ``_apply_control``: actions arrive already processed
+        (PD targets for PROPORTIONAL, torques for TORQUE), so they are used
+        as-is. The PD law itself runs in a Warp kernel inside ``_simulate``.
+        """
+        if self.control_type == ControlType.PROPORTIONAL:
+            pd_tar = actions
+            if (
+                self._domain_randomization is not None
+                and "action_noise" in self._domain_randomization
+            ):
+                pd_tar = pd_tar.clone()
+                pd_tar[
+                    ..., self._domain_randomization["action_noise"]["dof_indices"]
+                ] += self._domain_randomization["action_noise"]["action_noise"]
+            sim_targets = pd_tar[:, self.data_conversion.dof_convert_to_sim]
+            self._update_pd_targets(sim_targets)
+        elif self.control_type == ControlType.TORQUE:
+            torques = actions
+            if (
+                self._domain_randomization is not None
+                and "action_noise" in self._domain_randomization
+            ):
+                torques = torques.clone()
+                torques[
+                    ..., self._domain_randomization["action_noise"]["dof_indices"]
+                ] += self._domain_randomization["action_noise"]["action_noise"]
+            torques = torch.clip(
+                torques, -self._torque_limits_common, self._torque_limits_common
+            )
+            sim_torques = torques[:, self.data_conversion.dof_convert_to_sim]
+            self._update_torques(sim_torques)
 
     def _set_simulator_env_state(
         self,
@@ -960,6 +1033,7 @@ class NewtonSimulator(Simulator):
         is both safe and cheap.
         """
         return None
+
 
     def _get_simulator_bodies_state(
         self, env_ids: Optional[torch.Tensor] = None

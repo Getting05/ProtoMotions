@@ -56,6 +56,55 @@ from protomotions.simulator.base_simulator.simulator_state import (
 )
 
 
+def _force_sequential_cloning() -> None:
+    """Make IsaacLab assign scene ``i``'s object to env ``i`` instead of drawing at random.
+
+    This gives the exact mapping only when every scene has one object. Each object
+    slot is spawned as its own group, and IsaacLab 3 enumerates combinations of the
+    groups' prototypes with the last group varying fastest, so with two objects per
+    scene env ``i`` gets combination ``(i // N, i % N)`` for ``N`` scenes: the last
+    slot is right, but every earlier slot holds scene 0's object in every env. That
+    is still better than the random default, which scrambles every slot.
+
+    IsaacLab 3 picks which spawn prototype each env receives via a pluggable strategy,
+    and the default is ``random`` -- uniform sampling WITH REPLACEMENT. IsaacLab 2 used a
+    plain round-robin, which for one-prototype-per-env is the identity map ProtoMotions
+    relies on: env i must receive scene i's furniture, because env i is tracking the motion
+    authored against it. Under the random default the furniture is scrambled -- several envs
+    get the same mesh and others get none -- while positions, physics properties and the
+    motion are still applied per env index. The result looks like a plausible scene
+    containing the wrong object, and nothing warns.
+
+    ``InteractiveScene`` builds its own ``CloneCfg`` and offers no injection point. Patching
+    ``CloneCfg`` does not work either: ``configclass`` turns the default into a
+    ``default_factory`` closure captured at class-creation time, so neither the class
+    attribute nor the field default is consulted afterwards. What ``InteractiveScene`` does
+    do is call ``cloner.ReplicateSession(...)`` by module-attribute lookup at call time --
+    so wrapping that class is the one hook that takes effect.
+    """
+    try:
+        import isaaclab.cloner as _cloner
+        from isaaclab.cloner.cloner_strategies import sequential
+    except ImportError:  # pragma: no cover - older IsaacLab has no pluggable strategy
+        return
+
+    session_cls = _cloner.ReplicateSession
+    if getattr(session_cls, "_protomotions_sequential", False):
+        return
+
+    class _SequentialReplicateSession(session_cls):
+        _protomotions_sequential = True
+
+        def __init__(self, *args, **kwargs):
+            kwargs["clone_strategy"] = sequential
+            super().__init__(*args, **kwargs)
+
+    _cloner.ReplicateSession = _SequentialReplicateSession
+    log.info(
+        "Forced IsaacLab clone strategy to 'sequential' (IsaacLab 3 defaults to 'random')."
+    )
+
+
 class IsaacLabSimulator(Simulator):
     config: IsaacLabSimulatorConfig
 
@@ -125,6 +174,9 @@ class IsaacLabSimulator(Simulator):
 
         scene_cfg = self._get_scene_cfg()
 
+        # IsaacLab 3 defaults to a RANDOM clone strategy that scrambles which furniture
+        # each env receives; force sequential so env i gets scene i's object.
+        _force_sequential_cloning()
         self._scene = InteractiveScene(scene_cfg)
         if not self.headless:
             self._setup_keyboard()
@@ -532,6 +584,36 @@ class IsaacLabSimulator(Simulator):
                 wp.from_torch(all_env_ids, dtype=wp.int32),
             )
 
+        if self._domain_randomization is not None and "body_mass" in self._domain_randomization:
+            body_mass = self._domain_randomization["body_mass"]
+            body_names = [
+                self.robot_config.kinematic_info.body_names[body_idx]
+                for body_idx in body_mass["body_indices"]
+            ]
+            isaaclab_body_ids, _ = self._robot.find_bodies(
+                body_names, preserve_order=True
+            )
+            body_ids = torch.tensor(isaaclab_body_ids, dtype=torch.int32, device=self.device)
+            env_ids = torch.arange(
+                self.num_envs, dtype=torch.int32, device=self.device
+            )
+            num_buckets = body_mass["mass"].shape[0]
+            bucket_ids = torch.randint(
+                0, num_buckets, (self.num_envs,), device=self.device
+            )
+            masses = body_mass["mass"].to(self.device)[bucket_ids]
+            self._robot.set_masses_index(
+                masses=masses, body_ids=body_ids, env_ids=env_ids
+            )
+
+            default_mass = self._robot.data.default_mass.torch
+            default_inertia = self._robot.data.default_inertia.torch
+            ratios = masses / default_mass[env_ids[:, None], body_ids]
+            inertias = default_inertia[env_ids[:, None], body_ids] * ratios[..., None]
+            self._robot.set_inertias_index(
+                inertias=inertias, body_ids=body_ids, env_ids=env_ids
+            )
+
         self._apply_scene_object_properties_after_spawn(all_env_ids)
 
     def _apply_scene_object_properties_after_spawn(
@@ -626,6 +708,40 @@ class IsaacLabSimulator(Simulator):
             if (idx + 1) % self.decimation == 0 and not self.headless:
                 self._sim.render()
             self._scene.update(dt=self._sim.get_physics_dt())
+
+    def flush_contact_cache(self) -> None:
+        """Move every env out of contact and simulate one physics substep there.
+
+        PhysX remembers each link/ground contact from the last simulated
+        substep, and writing a new root pose and joint state does not clear
+        that memory. After evaluation every env is written back to its saved
+        pre-evaluation state; a robot that was still walking when evaluation
+        ended is teleported into its saved mid-stride pose, and the first
+        substep can resolve the old contacts against the new pose and launch
+        it. Teleporting away alone is not enough: PhysX only drops a contact
+        after simulating a substep in which the bodies no longer touch. So every
+        robot goes 50 m underground and its scene objects 20 m further down,
+        one substep runs there, and the caller then overwrites all robot and
+        object state, so these poses never reach training.
+
+        Measured with the real evaluator at 8192 envs: an Agile tracker had 47
+        launches among 177,564 robots still walking when evaluation ended
+        (link speeds up to 4.5e15 m/s, occasionally a non-finite velocity that
+        crashed the run) and 0 of 177,386 with the flush; the G1 bones-deploy
+        tracker had 4 of 57,758 (up to 63 m/s) and 0 of 57,955 with it. The
+        flush costs about 0.1 s per evaluation.
+        """
+        # Scene-update hooks (such as P2's point IMU) must not observe the
+        # temporary underground poses as a real rollout sample.
+        was_flushing = getattr(self, "_flushing_contact_cache", False)
+        self._flushing_contact_cache = True
+        try:
+            self._move_all_envs_out_of_contact(hide_z=-50.0, object_drop=20.0)
+            self._scene.write_data_to_sim()
+            self._sim.step(render=False)
+            self._scene.update(dt=self._sim.get_physics_dt())
+        finally:
+            self._flushing_contact_cache = was_flushing
 
     def _apply_simulator_pd_targets(self, pd_targets: torch.Tensor) -> None:
         """Applies PD position targets using IsaacLab's internal PD controller."""

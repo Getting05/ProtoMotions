@@ -707,6 +707,24 @@ class BaseAgent:
             self.fit_start_time = time.time()
         self.fabric.call("on_fit_start", self)
 
+        # Guarantee last.ckpt exists once training is reached: a resume point for a
+        # long first epoch, and the signal the cluster retry harness reads
+        # (scripts/cluster/retry_lib.sh) to tell "reached training" from a flaky
+        # scene build. Write it ONLY when absent. On a resume the loaded checkpoint
+        # already is the resume point, and re-writing here every attempt would
+        # advance last.ckpt's mtime with no real progress -- which the retry loop
+        # would misread as "training advanced", resetting its no-progress and
+        # exception-repeat counters and so masking a deterministic first-epoch crash
+        # instead of fast-failing it. Broadcast rank 0's view so every rank makes the
+        # SAME call: save() runs distributed collectives, and a split decision would
+        # deadlock. Safe to save here -- the forward pass during buffer registration
+        # above already materialized every LazyLinear parameter.
+        need_initial_ckpt = self.fabric.broadcast(
+            not (self.root_dir / "last.ckpt").exists()
+        )
+        if need_initial_ckpt:
+            self.save(checkpoint_name="last.ckpt")
+
         while self.current_epoch < self.max_epochs:
             self.epoch_start_time = time.time()
 

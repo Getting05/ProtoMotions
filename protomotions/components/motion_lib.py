@@ -67,6 +67,81 @@ def _select_exact_frame(field_data: torch.Tensor, frame_indices: torch.Tensor):
     return selected.clone() if frame_indices.ndim == 0 else selected
 
 
+_CONTACT_SMOOTH_CHUNK_ELEMENTS = 1 << 20
+
+
+def _smooth_contacts_segmented(
+    contacts: torch.Tensor,
+    length_starts: torch.Tensor,
+    motion_num_frames: torch.Tensor,
+    window_size: int,
+) -> torch.Tensor:
+    """Smooth per-motion contacts in bounded device-side frame blocks.
+
+    ``contacts`` stores all motion clips concatenated along the frame axis. A
+    regular convolution over that tensor would leak values across clip
+    boundaries, so this implementation uses a prefix sum for each frame's
+    in-motion window and adds the replicate-padding contributions at the two
+    boundaries. Float64 prefixes preserve small windows in large corpora, while
+    blocks avoid a whole-corpus prefix and per-frame index tensors. There is
+    one Python iteration per block, without a host/device sync per motion.
+    """
+    num_frames_total, num_bodies = contacts.shape
+    if num_frames_total == 0 or num_bodies == 0:
+        return contacts.to(dtype=torch.float32)
+
+    # Motion metadata is normally already on the contact device, but keeping
+    # it explicit prevents bucketize/indexing from falling back to CPU.
+    length_starts = length_starts.to(device=contacts.device)
+    motion_num_frames = motion_num_frames.to(device=contacts.device)
+    padding = window_size // 2
+    frames_per_block = max(1, _CONTACT_SMOOTH_CHUNK_ELEMENTS // num_bodies)
+    smoothed = torch.empty_like(contacts, dtype=torch.float32)
+
+    for block_start in range(0, num_frames_total, frames_per_block):
+        block_end = min(block_start + frames_per_block, num_frames_total)
+        frame_indices = torch.arange(block_start, block_end, device=contacts.device)
+        frame_motion_ids = torch.bucketize(
+            frame_indices, length_starts[1:], right=True
+        )
+        starts = length_starts[frame_motion_ids]
+        ends = starts + motion_num_frames[frame_motion_ids]
+        left_indices = torch.maximum(frame_indices - padding, starts)
+        right_indices = torch.minimum(frame_indices + padding + 1, ends)
+
+        # Include the window's halo across block boundaries. Motion boundaries
+        # remain absolute and clamp every query before indexing this local prefix.
+        local_start = max(0, block_start - padding)
+        local_end = min(num_frames_total, block_end + padding)
+        local_contacts = contacts[local_start:local_end].to(dtype=torch.float32)
+        # A float32 prefix loses unit changes beyond 2**24 contacts. Float64
+        # also preserves non-integer input probabilities without integer casts.
+        prefix = torch.cat(
+            [torch.zeros(1, num_bodies, device=contacts.device, dtype=torch.float64),
+             local_contacts.cumsum(0, dtype=torch.float64)],
+            dim=0,
+        )
+        in_motion_sum = (prefix[right_indices - local_start]
+                         - prefix[left_indices - local_start])
+
+        # Replicate each clip's first/last sample, not the block's edges.
+        left_repeat_count = (starts + padding - frame_indices).clamp_min(0).to(
+            dtype=torch.float64
+        )
+        right_repeat_count = (
+            frame_indices + padding + 1 - ends
+        ).clamp_min(0).to(dtype=torch.float64)
+        left_edge = contacts[starts].to(dtype=torch.float32)
+        right_edge = contacts[ends - 1].to(dtype=torch.float32)
+        smoothed[block_start:block_end] = (
+            in_motion_sum
+            + left_repeat_count.unsqueeze(1) * left_edge
+            + right_repeat_count.unsqueeze(1) * right_edge
+        ) / window_size
+
+    return smoothed
+
+
 def _discover_shard_files(pattern: str) -> Dict[int, str]:
     pattern_path = Path(pattern)
     filename = pattern_path.name
@@ -939,46 +1014,14 @@ class MotionLib:
 
         print(f"Smoothing contact labels with window size {window_size}...")
 
-        # contacts shape: [total_frames, num_bodies]
-        total_frames, num_bodies = self.contacts.shape
-        num_motions = self.num_motions()
-
-        # Create uniform kernel for moving average
-        kernel = (
-            torch.ones(1, 1, window_size, device=self.device, dtype=torch.float32)
-            / window_size
+        # Smooth concatenated frame blocks while preserving motion boundaries
+        # and replicate-padding semantics for each variable-length clip.
+        smoothed_contacts = _smooth_contacts_segmented(
+            self.contacts,
+            self.length_starts,
+            self.motion_num_frames,
+            window_size,
         )
-        padding = window_size // 2
-
-        # Smooth each motion independently to respect motion boundaries
-        smoothed_contacts = torch.zeros_like(self.contacts, dtype=torch.float32)
-
-        for motion_idx in range(num_motions):
-            # Get the range for this motion
-            start_idx = self.length_starts[motion_idx].item()
-            num_frames = self.motion_num_frames[motion_idx].item()
-            end_idx = start_idx + num_frames
-
-            # Extract contacts for this motion: [num_frames, num_bodies]
-            motion_contacts = self.contacts[start_idx:end_idx].float()
-
-            # Reshape for conv1d: [num_bodies, 1, num_frames]
-            contacts_for_conv = motion_contacts.t().unsqueeze(1)
-
-            # Manually apply replicate padding (functional conv1d doesn't support padding_mode)
-            padded_contacts = torch.nn.functional.pad(
-                contacts_for_conv,
-                (padding, padding),  # pad left and right
-                mode="replicate",
-            )
-
-            # Apply 1D convolution (no padding needed since we already padded)
-            smoothed_motion = torch.nn.functional.conv1d(
-                padded_contacts, kernel, padding=0
-            )
-
-            # Reshape back to [num_frames, num_bodies] and store
-            smoothed_contacts[start_idx:end_idx] = smoothed_motion.squeeze(1).t()
 
         # Replace contacts with smoothed version
         self.contacts = smoothed_contacts
@@ -987,7 +1030,8 @@ class MotionLib:
         self.contacts = torch.clamp(self.contacts, 0.0, 1.0)
 
         print(
-            f"Contact smoothing complete for {num_motions} motions. Contacts are now float values in [0, 1]."
+            f"Contact smoothing complete for {self.motion_num_frames.numel()} motions. "
+            "Contacts are now float values in [0, 1]."
         )
 
     def translate_all_motions_to_origin(self, target_xy: Optional[torch.Tensor] = None):

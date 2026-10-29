@@ -266,6 +266,37 @@ def test_make_bm_pd_action_config_uses_default_pose_and_effort_over_stiffness_sc
     assert torch.equal(config["damping"], torch.tensor([1.0, 2.0, 4.0, 5.0, 10.0]))
 
 
+def test_bm_unit_action_preserves_fork_effort_at_default_pose():
+    robot = _mixed_dof_robot_config()
+    config = make_bm_pd_action_config(robot)
+    fn = config.pop("fn")
+    result = fn(torch.ones(2, 5), **config)
+    torque = config["stiffness"] * (result["processed_action"] - robot.default_dof_pos)
+    expected = torch.tensor([100.0, 80.0, 60.0, 25.0, 10.0])
+    torch.testing.assert_close(torque, expected.expand_as(torque))
+
+
+def test_bm_recipe_preserves_processed_action_smoothness_and_weight():
+    from argparse import Namespace
+
+    from examples.experiments.mimic.mlp_bm_l2c2 import env_config
+    from protomotions.envs.rewards import compute_action_smoothness
+
+    cfg = env_config(_mixed_dof_robot_config(), Namespace())
+    reward = cfg.reward_components["action_rate"]
+    assert reward.compute_func is compute_action_smoothness
+    assert {key: str(path) for key, path in reward.dynamic_vars.items()} == {
+        "current_processed_action": "current_processed_action",
+        "previous_processed_action": "previous_processed_action",
+    }
+    assert reward.static_params["weight"] == -0.1
+    assert cfg.num_state_history_steps >= 1
+    torch.testing.assert_close(
+        cfg.action_config["action_scale"],
+        torch.tensor([10.0, 4.0, 1.5, 0.5, 0.1]),
+    )
+
+
 def test_make_passthrough_pd_action_config_builds_fixed_gain_config_only():
     robot_config = _mixed_dof_robot_config()
 

@@ -27,6 +27,13 @@ reproduce the motion while maintaining physical plausibility.
 * ``mlp_bm_l2c2.py`` - BeyondMimic policy with a torso anchor and L2C2 smoothness regularization, aimed at sim2real
 * ``fsq.py`` - FSQ tracker over max-coordinates proprioception and target poses
 
+This fork retains the BM action mapping
+``q_target = q_default + effort_limit / stiffness * action`` and the original
+``action_smoothness_factory(weight=-0.1)`` reward on processed actions.
+The upstream quarter-effort scaling and raw-action-rate recipe are deliberately
+not applied when integrating the reliability updates. Resume and inference
+continue to use the scales and reward bindings saved in ``resolved_configs.pt``.
+
 **Example command**:
 
 .. code-block:: bash

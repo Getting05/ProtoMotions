@@ -27,6 +27,7 @@ class VideoTests(unittest.TestCase):
         self.agent = NS(
             root_dir=self.root,
             current_epoch=200,
+            config=NS(_target_="protomotions.agents.ppo.agent.PPO"),
             fabric=NS(global_rank=0, device=NS(index=0), loggers=[]),
             env=NS(
                 motion_lib=NS(

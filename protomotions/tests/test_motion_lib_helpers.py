@@ -22,6 +22,7 @@ from protomotions.components.motion_lib import (
     MotionFileSwitchMode,
     MotionLib,
     MotionLibConfig,
+    _smooth_contacts_segmented,
     resolve_shard_file,
     select_motion_shard,
 )
@@ -212,6 +213,155 @@ def _populate_motion_lib(motion_lib, motion_lengths, motion_num_frames):
         [sum(motion_num_frames[:i]) for i in range(len(motion_num_frames))],
         dtype=torch.long,
     )
+
+
+def _smooth_contacts_reference(
+    contacts: torch.Tensor,
+    length_starts: torch.Tensor,
+    motion_num_frames: torch.Tensor,
+    window_size: int,
+) -> torch.Tensor:
+    """Reference implementation matching the original per-motion loop."""
+    padding = window_size // 2
+    kernel = torch.ones(
+        1, 1, window_size, device=contacts.device, dtype=torch.float32
+    ) / window_size
+    smoothed = torch.zeros_like(contacts, dtype=torch.float32)
+    for start, num_frames in zip(length_starts.tolist(), motion_num_frames.tolist()):
+        end = start + num_frames
+        motion_contacts = contacts[start:end].float()
+        padded = torch.nn.functional.pad(
+            motion_contacts.t().unsqueeze(1),
+            (padding, padding),
+            mode="replicate",
+        )
+        smoothed_motion = torch.nn.functional.conv1d(padded, kernel)
+        smoothed[start:end] = smoothed_motion.squeeze(1).t()
+    return smoothed
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="CUDA is unavailable"
+            ),
+        ),
+    ],
+)
+def test_smooth_contacts_vectorized_matches_reference_for_variable_lengths(device):
+    """The segmented GPU path must preserve per-motion replicate padding."""
+    generator = torch.Generator(device=device).manual_seed(1234)
+    motion_num_frames = torch.tensor([1, 2, 3, 8, 11], device=device)
+    length_starts = torch.cat(
+        [
+            torch.zeros(1, dtype=torch.long, device=device),
+            motion_num_frames.cumsum(0)[:-1],
+        ]
+    )
+    contacts = torch.randint(
+        0,
+        2,
+        (int(motion_num_frames.sum().item()), 3),
+        generator=generator,
+        device=device,
+        dtype=torch.bool,
+    )
+
+    expected = _smooth_contacts_reference(
+        contacts, length_starts, motion_num_frames, window_size=7
+    )
+    actual = _smooth_contacts_segmented(
+        contacts, length_starts, motion_num_frames, window_size=7
+    )
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-6)
+
+
+def test_smooth_contacts_preserves_float_probabilities_and_output_convention():
+    contacts = torch.tensor(
+        [[0.125, 0.75], [0.5, 0.25], [0.875, 0.0], [0.25, 0.625]],
+        dtype=torch.float64,
+    )
+    starts, lengths = torch.tensor([0, 1]), torch.tensor([1, 3])
+    expected = _smooth_contacts_reference(contacts, starts, lengths, 7)
+    actual = _smooth_contacts_segmented(contacts, starts, lengths, 7)
+
+    assert actual.dtype == torch.float32
+    assert actual.device == contacts.device
+    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-6)
+
+
+@pytest.mark.parametrize("chunk_elements", [1, 7, 16])
+@pytest.mark.parametrize("window_size", [1, 7, 31])
+@pytest.mark.parametrize("probabilities", [False, True])
+def test_smooth_contacts_block_halo_preserves_clip_boundaries(
+    monkeypatch, chunk_elements, window_size, probabilities
+):
+    # Three contact channels force frame blocks of 1, 2 or 5 frames. Blocks
+    # split motions, span motion boundaries, and can be shorter than the halo.
+    monkeypatch.setattr(
+        "protomotions.components.motion_lib._CONTACT_SMOOTH_CHUNK_ELEMENTS",
+        chunk_elements,
+    )
+    lengths = torch.tensor([1, 2, 5, 3, 1])
+    starts = torch.cat([torch.zeros(1, dtype=torch.long), lengths.cumsum(0)[:-1]])
+    generator = torch.Generator().manual_seed(43)
+    contacts = torch.randint(0, 2, (int(lengths.sum()), 3), generator=generator).bool()
+    if probabilities:
+        contacts = torch.rand(contacts.shape, generator=generator)
+    expected = _smooth_contacts_reference(contacts, starts, lengths, window_size)
+
+    actual = _smooth_contacts_segmented(contacts, starts, lengths, window_size)
+
+    assert actual.dtype == torch.float32
+    assert actual.device == contacts.device
+    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-6)
+
+
+def test_smooth_contacts_large_corpus_retains_unit_windows_in_later_clips():
+    # The result needs 64 MiB; block-local temporary storage is bounded rather
+    # than multiplied by the full corpus length. Leave room for the test runner.
+    # Read both host and cgroup limits before allocating on constrained CI.
+    required = 1024**3
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        pytest.skip("Large-corpus memory check requires Linux /proc/meminfo")
+    available = int(next(line.split()[1] for line in meminfo.read_text().splitlines()
+                         if line.startswith("MemAvailable:"))) * 1024
+    cgroup_root = Path("/sys/fs/cgroup")
+    cgroup_info = Path("/proc/self/cgroup")
+    group = cgroup_root
+    if cgroup_info.exists():
+        for line in cgroup_info.read_text().splitlines():
+            if line.startswith("0::"):
+                group = cgroup_root / line.split(":", 2)[2].lstrip("/")
+    while group.is_relative_to(cgroup_root):
+        memory_limit = group / "memory.max"
+        memory_current = group / "memory.current"
+        if memory_limit.exists() and memory_current.exists():
+            limit = memory_limit.read_text().strip()
+            if limit != "max":
+                available = min(available, int(limit) - int(memory_current.read_text()))
+        group = group.parent
+    if available < required:
+        pytest.skip("Large-corpus contact regression requires 1 GiB available memory")
+
+    lengths = torch.tensor([2**24 + 32, 17, 31])
+    starts = torch.cat([torch.zeros(1, dtype=torch.long), lengths.cumsum(0)[:-1]])
+    n = int(lengths.sum())
+    contacts = torch.ones(1, 1, dtype=torch.float32).expand(n, 1)
+    actual = _smooth_contacts_segmented(contacts, starts, lengths, 7)
+
+    assert actual.shape == contacts.shape
+    assert actual.dtype == contacts.dtype
+    assert actual.device == contacts.device
+    # With a float32 global prefix, these all-one windows become 6/7 or 8/7
+    # after 2**24 contacts, including in clips after the first long motion.
+    torch.testing.assert_close(actual[-64:], torch.ones(64, 1), rtol=0, atol=0)
 
 
 def _identity_quat(num_frames: int, num_bodies: int) -> torch.Tensor:

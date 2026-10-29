@@ -70,7 +70,11 @@ class MimicEvaluator(BaseEvaluator):
         return metrics
 
     def initialize_eval(self) -> Dict:
-        """Initialize evaluation tracking and cache env state for restoration."""
+        """Initialize evaluation tracking and cache the state eval will overwrite.
+
+        Saves the env state, the model's rollout context, and the motion manager's
+        clip assignment, all restored by ``cleanup_after_evaluation``.
+        """
         num_motions = self.motion_lib.num_motions()
         self._eval_batches = self._build_eval_batches()
         self._eval_motion_ids = torch.cat([ids for _, ids in self._eval_batches])
@@ -85,8 +89,11 @@ class MimicEvaluator(BaseEvaluator):
         motion_num_frames = motion_num_frames.clamp(max=self.config.max_eval_steps)
         self._init_eval_component_buffers(num_motions)
 
-        # Cache env + motion manager state (restored in cleanup_after_evaluation)
+        # Cache env, model rollout context, and motion manager state (restored in
+        # cleanup_after_evaluation). Evaluation reseeds the model context of every
+        # env it resets, so training would otherwise resume with eval's context.
         self._env_snapshot = self.env.save_state()
+        self._model_context_snapshot = self.agent.model.save_rollout_context()
         self._cached_motion_ids = self.motion_manager.motion_ids.clone()
         self._cached_motion_times = self.motion_manager.motion_times.clone()
 
@@ -156,61 +163,45 @@ class MimicEvaluator(BaseEvaluator):
         return float(min_weight)
 
     def _park_inactive_envs(self, active_env_ids: Tensor) -> None:
-        """Move envs not in ``active_env_ids`` far below the terrain.
+        """Keep the fork's evaluation scene load by parking unscored slots.
 
-        With scene-paired motions, ``_build_eval_batches`` returns a single
-        batch whose ``env_ids`` (from ``get_unique_fixed_motions``) can be
-        much smaller than ``num_envs`` -- the remaining envs would otherwise
-        keep running physics with their (replicated) scenes, contributing
-        substantially to the PhysX broadphase pair budget and triggering
-        ``foundLostPairsCapacity`` overflow at large num_envs (silent contact
-        drops -> tunneling -> phantom failures).
-
-        Parking those envs at z << 0 removes their AABBs from the broadphase
-        active region without changing the policy's view of the rollout.
+        Newton overrides ``park_envs`` with a no-op because parking can poison
+        its solver warm starts. Other backends retain the historical behavior;
+        replacing this with background rollouts changes evaluation results.
         """
         if active_env_ids is None or active_env_ids.numel() >= self.num_envs:
             return
-        all_mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-        all_mask[active_env_ids] = False
-        inactive_env_ids = torch.nonzero(all_mask, as_tuple=False).flatten()
-        if inactive_env_ids.numel() == 0:
-            return
-        self.env.simulator.park_envs(inactive_env_ids)
+        inactive = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        inactive[active_env_ids] = False
+        inactive_env_ids = inactive.nonzero(as_tuple=False).flatten()
+        if inactive_env_ids.numel() > 0:
+            self.env.simulator.park_envs(inactive_env_ids)
 
     def evaluate_episode(self, env_ids: torch.Tensor, max_steps: int) -> None:
-        """Run a single episode batch, optionally with EMA action smoothing.
+        """Run the fork's scored-slot rollout with optional action EMA.
 
-        When eval_action_ema_alpha is set, actions are low-pass filtered to
-        simulate deployment conditions. Motions that fail under EMA get higher
-        sampling weight, creating curriculum pressure toward smooth policies.
+        Keep inactive-slot scheduling and action filtering compatible with saved
+        experiments. The upstream rollout-context fix still reseeds the model
+        rows whose environments are reset, then restores training's context in
+        ``cleanup_after_evaluation``.
         """
         ema_alpha = self.config.eval_action_ema_alpha
-
         self._on_episode_start(env_ids)
-
-        # Park envs that aren't part of this batch so they don't generate
-        # PhysX broadphase pairs / contacts during the eval. Pre-eval state is
-        # restored later in cleanup_after_evaluation via env.restore_state().
         self._park_inactive_envs(env_ids)
-
         obs, _ = self.env.reset(env_ids, **self._get_reset_kwargs())
+        self.agent.model.reset_rollout_context(env_ids=env_ids)
         self.agent.pre_collect_step(0)
         obs = self.agent.add_agent_info_to_obs(obs)
         obs_td = self.agent.obs_dict_to_tensordict(obs)
 
         prev_actions = None
-
         for step_idx in range(max_steps):
             actions = self._policy_action(obs_td)
-
-            # Apply EMA smoothing (deployment simulation)
             if ema_alpha is not None:
                 if prev_actions is None:
                     prev_actions = actions.clone()
                 actions = ema_alpha * actions + (1.0 - ema_alpha) * prev_actions
                 prev_actions = actions.clone()
-
             obs, rewards, dones, terminated, extras = self.env.step(actions)
             self.agent.pre_collect_step(step_idx + 1)
             obs = self.agent.add_agent_info_to_obs(obs)
@@ -288,7 +279,7 @@ class MimicEvaluator(BaseEvaluator):
     # --- Hook overrides ---
 
     def _on_episode_start(self, env_ids: Tensor) -> None:
-        """Set motion_ids/times in the motion manager before reset."""
+        """Set scored slots' motion IDs/times without changing inactive slots."""
         self.motion_manager.motion_ids[env_ids] = self._episode_ctx.motion_ids
         self.motion_manager.motion_times[env_ids] = 0.0
 
@@ -354,12 +345,19 @@ class MimicEvaluator(BaseEvaluator):
         return to_log, success_rate, num_eval_items
 
     def cleanup_after_evaluation(self) -> None:
-        """Restore env and motion manager state after evaluation."""
+        """Restore the env, model rollout context, and motion manager state.
+
+        ``env.restore_state`` first clears the simulator's contact memory (see
+        ``Simulator.flush_contact_cache``), then writes every env's saved state
+        back, so training continues the episodes it was running before eval.
+        """
         self.motion_manager.motion_ids = self._cached_motion_ids
         self.motion_manager.motion_times = self._cached_motion_times
         self.env.restore_state(self._env_snapshot)
+        self.agent.model.load_rollout_context(self._model_context_snapshot)
 
         del self._env_snapshot
+        del self._model_context_snapshot
         del self._cached_motion_ids
         del self._cached_motion_times
         del self._eval_batches

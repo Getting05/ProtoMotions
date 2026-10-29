@@ -350,14 +350,14 @@ def bm_pd_action(
 ) -> Dict[str, Tensor]:
     """BeyondMimic-style action scaling for implicit PD control.
 
-    Scales raw policy output by ``0.25 * effort_limit / stiffness`` per joint,
+    Scales raw policy output by ``effort_limit / stiffness`` per joint,
     so ~O(1) policy outputs map to ~25% of the maximum achievable deflection.
     No tanh or clamp is applied — the policy learns its own output magnitude.
 
     Args:
         action: Raw action tensor from policy [num_envs, num_actions]
         pd_action_offset: Per-joint default positions [num_actions]
-        action_scale: Per-joint scale ``0.25 * effort_limit / stiffness`` [num_actions]
+        action_scale: Per-joint scale ``effort_limit / stiffness`` [num_actions]
         stiffness: Fixed per-joint stiffness gains [num_actions]
         damping: Fixed per-joint damping gains [num_actions]
 

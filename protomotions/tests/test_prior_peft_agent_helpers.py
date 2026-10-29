@@ -161,10 +161,20 @@ class _SingleRankFabric:
     world_size = 1
     global_rank = 0
 
+    def __init__(self):
+        self.device = torch.device("cpu")
+        self.reductions = []
+
+    def all_reduce(self, value, reduce_op="mean"):
+        assert reduce_op in {"mean", "sum"}
+        self.reductions.append((value.detach().clone(), reduce_op))
+        return value
+
 
 class _Env:
     def __init__(self, obs):
         self.obs = obs
+        self.simulator = SimpleNamespace(_physics_guard=None)
 
     def get_obs(self):
         return {key: value.clone() for key, value in self.obs.items()}
@@ -194,6 +204,7 @@ _DEFAULT_CONDITIONING_KEYS = (
 def _config(token_perturb_rate=0.0, token_perturb_mode="replace"):
     return SimpleNamespace(
         normalize_rewards=False,
+        physics_guard_enabled=True,
         task_reward_w=1.0,
         entropy_coef=0.01,
         pretrained_modules={},
@@ -251,6 +262,8 @@ def _agent(has_critic=True, token_perturb_rate=0.0, token_perturb_mode="replace"
     agent.critic = _Wrapper(critic) if critic is not None else None
     agent.config = _config(token_perturb_rate, token_perturb_mode)
     agent.config.model.critic = SimpleNamespace() if has_critic else None
+    agent.fabric = _SingleRankFabric()
+    agent.env = _Env(_obs())
     agent.device = torch.device("cpu")
     agent.gamma = 0.9
     agent.tau = 0.8
@@ -506,6 +519,10 @@ def test_prior_peft_target_kl_skips_actor_update_but_keeps_critic_update():
     assert agent.critic_optimizer.steps == 1
     assert log_dict["ppo/kl_early_stopped"].item() == 1.0
     assert log_dict["actor/update_skipped"].item() == 1.0
+    assert len(agent.fabric.reductions) == 1
+    reduced_kl, reduce_op = agent.fabric.reductions[0]
+    assert torch.equal(reduced_kl, torch.tensor(0.2))
+    assert reduce_op == "mean"
 
 
 def test_prior_peft_config_requires_explicit_pretrained_modules():
@@ -615,15 +632,18 @@ def test_prior_peft_init_delegates_base_init_for_rlft(monkeypatch):
 
     def fake_fine_tuning_init(self, fabric, env, config, root_dir=None):
         captured["args"] = (self, fabric, env, config, root_dir)
+        self.fabric, self.env, self.config = fabric, env, config
+        self.root_dir = root_dir
         self.e_clip = config.e_clip
         self.tau = config.tau
 
     monkeypatch.setattr(fine_tuning_agent_module.FineTuningAgent, "__init__", fake_fine_tuning_init)
 
-    fabric = object()
-    env = object()
+    fabric = _SingleRankFabric()
+    env = _Env(_obs())
     config = SimpleNamespace(
         pretrained_modules={},
+        physics_guard_enabled=True,
         e_clip=0.3,
         tau=0.7,
         model=SimpleNamespace(critic=SimpleNamespace()),
@@ -636,6 +656,7 @@ def test_prior_peft_init_delegates_base_init_for_rlft(monkeypatch):
     assert agent.e_clip == 0.3
     assert agent.tau == 0.7
     assert captured["args"] == (agent, fabric, env, config, root_dir)
+    assert agent.env.simulator._physics_guard is None
 
 def test_prior_peft_init_rejects_missing_rlft_critic_or_sft_critic(monkeypatch):
     monkeypatch.setattr(
@@ -771,6 +792,8 @@ def test_prior_peft_amp_optimization_runs_peft_then_amp_tail(monkeypatch):
 
     agent = object.__new__(DiscretePriorPEFTRLFTAMPAgent)
     agent.config = _config()
+    agent.fabric = _SingleRankFabric()
+    agent.env = _Env(_obs())
     agent.config.amp_parameters = SimpleNamespace(
         discriminator_optimization_ratio=1,
     )
@@ -1050,9 +1073,12 @@ def test_prior_peft_print_param_info_reports_trainable_and_critic_counts(caplog)
     assert "[TRAIN]" not in out
 
 
-def test_prior_peft_registers_model_outputs_and_algorithm_keys():
+@pytest.mark.parametrize("with_guard", [False, True])
+def test_prior_peft_registers_model_outputs_and_algorithm_keys(with_guard):
     agent = _agent(has_critic=True)
     agent.experience_buffer = _ExperienceBufferRecorder()
+    if with_guard:
+        agent.env.simulator._physics_guard = object()
 
     assert agent.model.experience_buffer_keys() == [
         "action",
@@ -1072,6 +1098,9 @@ def test_prior_peft_registers_model_outputs_and_algorithm_keys():
     }.issubset(registered)
     assert "values" not in registered
     assert "next_values" not in registered
+    assert ("physics_valid" in registered) is with_guard
+    if with_guard:
+        assert ("physics_valid", (), torch.bool) in agent.experience_buffer.registered
 
     assert not hasattr(DiscretePriorPEFTRLFTAgent, "_collect_rollout_step_sft")
 
@@ -1108,14 +1137,15 @@ def test_prior_peft_record_rollout_step_records_next_value_after_base_metrics():
 
     DiscretePriorPEFTRLFTAgent.record_rollout_step(
         agent,
-        next_obs_td=TensorDict(_obs(), batch_size=2),
-        actions=torch.zeros(2, 2),
-        rewards=torch.tensor([1.0, 2.0]),
-        dones=torch.tensor([False, True]),
-        terminated=torch.tensor([False, True]),
-        done_indices=torch.tensor([1]),
-        extras={},
-        step=1,
+        # The training loop calls this through the guard mixin positionally.
+        TensorDict(_obs(), batch_size=2),
+        torch.zeros(2, 2),
+        torch.tensor([1.0, 2.0]),
+        torch.tensor([False, True]),
+        torch.tensor([False, True]),
+        torch.tensor([1]),
+        {},
+        1,
     )
 
     assert torch.equal(
@@ -1227,6 +1257,9 @@ def test_prior_peft_fit_runs_one_epoch_rollout_eval_and_checkpoint_branches(
     agent.best_evaluated_score = None
     agent._should_stop = False
     agent.fabric = _Fabric()
+    # A dir with no last.ckpt so the loop-entry "reached training" save fires (it is
+    # written only when absent).
+    agent.root_dir = Path("nonexistent_fit_test_dir")
     agent.env = _FitEnv()
     agent.evaluator = _Evaluator()
     agent.model = _FitModel()
@@ -1360,6 +1393,9 @@ def test_prior_peft_fit_skip_update_branch_can_stop_training(monkeypatch):
     agent.best_evaluated_score = None
     agent._should_stop = True
     agent.fabric = _Fabric()
+    # A dir with no last.ckpt so the loop-entry "reached training" save fires (it is
+    # written only when absent).
+    agent.root_dir = Path("nonexistent_fit_test_dir")
     agent.env = _FitEnv()
     agent.evaluator = None
     agent.model = _FitModel()
@@ -1569,7 +1605,8 @@ def test_prior_peft_task_actor_step_uses_critic_advantages_and_prior_kl():
     ).sum(dim=-1).mean()
     assert torch.allclose(log_dict["actor/kl_prior_loss"], expected_kl)
     assert torch.allclose(log_dict["actor/adv_mean"], torch.tensor(0.0))
-    assert torch.allclose(log_dict["actor/adv_std"], torch.tensor(1.0))
+    # Two advantages normalized with sample std have population std sqrt(1/2).
+    assert torch.allclose(log_dict["actor/adv_std"], torch.tensor(0.5).sqrt())
     assert torch.allclose(log_dict["stats/reward_mean"], torch.tensor(2.0))
 
 
@@ -1606,7 +1643,8 @@ def test_prior_peft_task_actor_step_uses_critic_advantages_without_prior_kl():
     _, log_dict = DiscretePriorPEFTRLFTAgent._actor_step_discrete_ppo(agent, batch)
 
     assert torch.allclose(log_dict["actor/adv_mean"], torch.tensor(0.0))
-    assert torch.allclose(log_dict["actor/adv_std"], torch.tensor(1.0))
+    # The metric uses population std; normalization uses Bessel's correction.
+    assert torch.allclose(log_dict["actor/adv_std"], torch.tensor(0.5).sqrt())
     assert torch.equal(log_dict["actor/kl_prior_loss"], torch.tensor(0.0))
 
 
