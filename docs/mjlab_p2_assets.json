@@ -1,0 +1,192 @@
+{
+  "matching_mjcf_sha256": "13fae34efca48c88a65da783ae2ef682697884d84e89a9d058132f982e642d64",
+  "files": [
+    {
+      "path": "head_link.stl",
+      "bytes": 290534,
+      "sha256": "d74590eacd98fe4dc2e45419f5fb66cba81aa7302a721e5426e77987d0bb8d11"
+    },
+    {
+      "path": "imu_1_link.stl",
+      "bytes": 123684,
+      "sha256": "3407098aeb026eff766506e291d0ba7093a4748aed243232334ff6fdf2fe6f87"
+    },
+    {
+      "path": "imu_2_link.stl",
+      "bytes": 123684,
+      "sha256": "16519e4c6a38ae8282a0c5782204ae6fa7b30967f55225defed9a4ce473ddde7"
+    },
+    {
+      "path": "left_ankle_pitch_link.stl",
+      "bytes": 31384,
+      "sha256": "0608f442342c57392d7025167ee18b1168379031dea97f01a2fa4ec82fbec1eb"
+    },
+    {
+      "path": "left_ankle_roll_link.stl",
+      "bytes": 814384,
+      "sha256": "8d38904e7cec673f99f42200b37ec70d5ff01aa36ddcebcf376fc54e697af2bf"
+    },
+    {
+      "path": "left_elbow_link.stl",
+      "bytes": 409184,
+      "sha256": "37dac06a14e653b35641c26ece58fd5788c09fb3693165f522b91673c71bd70e"
+    },
+    {
+      "path": "left_hand_link.stl",
+      "bytes": 463984,
+      "sha256": "d0d54d348c81b1423a7ae1542d672a3eba732e0986084acd454795e2b46c5d35"
+    },
+    {
+      "path": "left_hip_pitch_link.stl",
+      "bytes": 247384,
+      "sha256": "909253cb045cb00d2149f2dcffe30d133957631cf2dd30415ed09f4a2aff075f"
+    },
+    {
+      "path": "left_hip_roll_link.stl",
+      "bytes": 909384,
+      "sha256": "ce333b46b8da1f4805f0f6e1cb33b80537c97ae3a59d2aa6db468605773122c2"
+    },
+    {
+      "path": "left_hip_yaw_link.stl",
+      "bytes": 561134,
+      "sha256": "76e8f881aab9cc38808711df4ee948e4642c5ed152f37f6aeb6c70c0249dac5b"
+    },
+    {
+      "path": "left_knee_link.stl",
+      "bytes": 871684,
+      "sha256": "9a599c7247a4736b3e7de8488bec683ec917d638e9f849c7c4b98a41ffab59a4"
+    },
+    {
+      "path": "left_shoulder_pitch_link.stl",
+      "bytes": 159384,
+      "sha256": "686557d66b4d6ecca7087c5d63557a79c26ac90e08ac6d3548eb9918a061607e"
+    },
+    {
+      "path": "left_shoulder_roll_link.stl",
+      "bytes": 409184,
+      "sha256": "c73170cd57407bf60146a25e36b4541b0c372c9bce9fe4f29f22c4b99738a071"
+    },
+    {
+      "path": "left_shoulder_yaw_link.stl",
+      "bytes": 387234,
+      "sha256": "5fb713934ed9ef21d66957c3870094fe496b4775fcb2bdf9e0a5436bc863c61a"
+    },
+    {
+      "path": "left_wrist_pitch_link.stl",
+      "bytes": 152284,
+      "sha256": "6498e8ee9a88ce20f8e00e9a1d9e489d352ffa7eed54f1b3ddb1f68b4da49a6f"
+    },
+    {
+      "path": "left_wrist_roll_link.stl",
+      "bytes": 317484,
+      "sha256": "6d1c31fe33c8b3c49d794011725675df04324dca7c563f6c45816adf523e2723"
+    },
+    {
+      "path": "left_wrist_yaw_link.stl",
+      "bytes": 330334,
+      "sha256": "4d6456e0aa3d3cb8b6d6228cdc56539c2e0ae88402b9529cad21ac20150de3ba"
+    },
+    {
+      "path": "lidar_link.stl",
+      "bytes": 1808134,
+      "sha256": "95da21801def68d85f139e31098bdab02e53bdfd585d2a87077d39910e4fad1b"
+    },
+    {
+      "path": "pelvis.stl",
+      "bytes": 443734,
+      "sha256": "7c023ca1c8a2c52f0c9fdec90cbaa14ad8b8f6c5952f3317469f638cdd8b7301"
+    },
+    {
+      "path": "right_ankle_pitch_link.stl",
+      "bytes": 31384,
+      "sha256": "dabfd7181a1cd1becd5af86284931f3b22ffc58313244a7ccc4e2bdc820e4ad8"
+    },
+    {
+      "path": "right_ankle_roll_link.stl",
+      "bytes": 809534,
+      "sha256": "65f4573af5b56f8e43791e27cfded36b87dbc30d8fd8f70b1f5dbc09bb9c4da9"
+    },
+    {
+      "path": "right_elbow_link.stl",
+      "bytes": 413684,
+      "sha256": "a9e700794080319789f4e0bf82184c5713260d68acb78488ffe99fae17a8ba61"
+    },
+    {
+      "path": "right_hand_link.stl",
+      "bytes": 494684,
+      "sha256": "f757e756939b96295764c74525acec7bc5b150afa29c8f1d7a73700cdf323bb8"
+    },
+    {
+      "path": "right_hip_pitch_link.stl",
+      "bytes": 247384,
+      "sha256": "34b821a8729f5cc698daa3d16632d06fc2b2f73a385894f41a2461fa9ff027b9"
+    },
+    {
+      "path": "right_hip_roll_link.stl",
+      "bytes": 889634,
+      "sha256": "d37431152103f805fff4398d474258c749a2f065a0384c13f1057be30b277b7c"
+    },
+    {
+      "path": "right_hip_yaw_link.stl",
+      "bytes": 561084,
+      "sha256": "f734f311702c2cd9eed91ee69395fb0b30c93b69eb9c4d0b02a6d0683a7b6814"
+    },
+    {
+      "path": "right_knee_link.stl",
+      "bytes": 871584,
+      "sha256": "2d2a47b99f38ed6d7d684fd398fbcdd6d1fa4a66573914c815a9e646fe2c0945"
+    },
+    {
+      "path": "right_shoulder_pitch_link.stl",
+      "bytes": 160284,
+      "sha256": "b9aa1df377bcc7f8641aedc390159ea293c236e18981dd91541533eb7810073a"
+    },
+    {
+      "path": "right_shoulder_roll_link.stl",
+      "bytes": 413684,
+      "sha256": "508dbbf4c0fd493d4c161534abfe9db2180c5b272073a81b7684cea88f2ac967"
+    },
+    {
+      "path": "right_shoulder_yaw_link.stl",
+      "bytes": 391634,
+      "sha256": "bf3ce8453f58ff2b78c877b43001a62d5cdd5d02f71d2c6cce7d21aed8b5622e"
+    },
+    {
+      "path": "right_wrist_pitch_link.stl",
+      "bytes": 153084,
+      "sha256": "bc810b534a88dc9476d0dd7619128f2cee52e598d31fd61d4918f83d7ca067b1"
+    },
+    {
+      "path": "right_wrist_roll_link.stl",
+      "bytes": 317534,
+      "sha256": "07c8e78cb2bbabdf9a1709e640c5c9e32d862745ad2110ff0bd204a6637f7747"
+    },
+    {
+      "path": "right_wrist_yaw_link.stl",
+      "bytes": 330334,
+      "sha256": "1f024b40172c534b331f50f8ab5e6c7a53337bf4493e4a1085a7f1939658d550"
+    },
+    {
+      "path": "torso_link.stl",
+      "bytes": 4688384,
+      "sha256": "d07cbd3ba95cd79404ded2de1d6c2a262d056a2094d5a621ce26379b584ba803"
+    },
+    {
+      "path": "waist_pitch_link.stl",
+      "bytes": 284184,
+      "sha256": "e999db74c5c0a902995b98ec9bd9a3169f63e6804ff21c8663c1b84a95c8e502"
+    },
+    {
+      "path": "waist_roll_link.stl",
+      "bytes": 432584,
+      "sha256": "dcba99a3f39ce942dcd546ffb4516b000a3bd349addb8390d66f0419c034d679"
+    },
+    {
+      "path": "waist_yaw_link.stl",
+      "bytes": 306634,
+      "sha256": "ee207141a43a78517c3dc64d6e580d199de3c797bf89d87944d1df72b9fa9037"
+    }
+  ],
+  "total_bytes": 20651508,
+  "description": "Matching P2 meshes installed separately on H200; binaries are not included in this backend commit."
+}

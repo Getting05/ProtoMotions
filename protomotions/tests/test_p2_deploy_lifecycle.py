@@ -227,3 +227,51 @@ def test_reset_suppresses_sampling_and_preserves_outer_guard(was_resetting):
         assert env.reset() == "reset"
     assert env._deploy_resetting is was_resetting
     _assert_bank_state(env._deploy_bank, before)
+
+
+def test_mjlab_hook_samples_after_guard_and_skips_maintenance():
+    """The mjlab substep hook must preserve P2's sampling lifecycle."""
+    events = []
+    callbacks = []
+    guard_invalid = torch.tensor([False, True])
+    simulator = SimpleNamespace(
+        _physics_guard=SimpleNamespace(invalid=guard_invalid),
+        _flushing_contact_cache=False,
+        register_post_physics_substep=lambda callback: callbacks.append(callback),
+    )
+    env = P2DeployEnv.__new__(P2DeployEnv)
+    env.simulator = simulator
+    env._deploy_resetting = False
+    env._deploy_bank = object()
+    env._sample_deploy_sensors = lambda invalid=None: events.append(invalid)
+    env._install_deploy_sensor_hook()
+    assert len(callbacks) == 1
+
+    callbacks[0]()
+    assert len(events) == 1 and events[0] is guard_invalid
+    simulator._flushing_contact_cache = True
+    callbacks[0]()
+    assert len(events) == 1
+    simulator._flushing_contact_cache = False
+    env._deploy_resetting = True
+    callbacks[0]()
+    assert len(events) == 1
+    env._deploy_resetting = False
+    del simulator._physics_guard
+    callbacks[0]()
+    assert events[-1] is None and len(events) == 2
+
+
+def test_p2_snapshot_methods_are_not_shadowed_by_merge():
+    """Avoid silently replacing main's strict P2 state restoration."""
+    source = Path(__file__).parents[1] / "envs/base_env/p2_deploy.py"
+    tree = ast.parse(source.read_text())
+    env_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "P2DeployEnv"
+    )
+    for method in ("save_state", "restore_state"):
+        assert sum(
+            isinstance(node, ast.FunctionDef) and node.name == method
+            for node in env_class.body
+        ) == 1, f"{method} was redefined during merge"

@@ -1,0 +1,288 @@
+{
+  "mjlab_astro512_single256_20261029": {
+    "label": "mjlab_astro512_single256_20261029",
+    "world_size": 1,
+    "envs_per_rank": 256,
+    "batch_size_per_rank": 1024,
+    "rollout_steps": 32,
+    "iterations": 100,
+    "warmup_excluded": 10,
+    "steady_iterations": 90,
+    "global_transitions": 819200,
+    "returncode": 0,
+    "abort_reason": null,
+    "run_wall_seconds": 364.36902683301014,
+    "steady_compute_fps": 3086.5599899369336,
+    "steady_wall_fps": 2956.1923151384713,
+    "steady_rollout_fps": 3302.6677543860856,
+    "compute_iteration_seconds": {
+      "mean": 2.654087406921705,
+      "median": 2.6576783484924817,
+      "min": 2.6227560109982733,
+      "max": 2.675261241995031,
+      "p10": 2.628366161021404,
+      "p90": 2.665997948992299
+    },
+    "rollout_seconds": {
+      "mean": 2.4804190458215696,
+      "median": 2.4838505045045167,
+      "min": 2.4514846410020255,
+      "max": 2.4996225899958517,
+      "p10": 2.456742522015702,
+      "p90": 2.4917032759985887
+    },
+    "update_seconds": {
+      "mean": 0.1727589468229174,
+      "median": 0.17277257300156634,
+      "min": 0.1701999299984891,
+      "max": 0.17534325498854741,
+      "p10": 0.17089528098586015,
+      "p90": 0.17422522901324555
+    },
+    "torch_peak_allocated_GiB": 2.1319527626037598,
+    "torch_peak_reserved_GiB": 2.443359375,
+    "memory_by_physical_gpu": {
+      "2": {
+        "peak_total_used_MiB": 133671,
+        "baseline_used_MiB": 129731,
+        "peak_increment_MiB": 3940,
+        "growth_method": "raw baseline difference",
+        "final_used_MiB": 129731,
+        "minimum_free_MiB": 9486
+      }
+    },
+    "loss_statistics": {
+      "losses/actor_loss": {
+        "mean": -0.033685434688813985,
+        "median": 0.017776869237422943,
+        "min": -3.2537245750427246,
+        "max": 0.5529419183731079,
+        "p10": -0.1674005687236786,
+        "p90": 0.26215246319770813
+      },
+      "losses/critic_loss": {
+        "mean": 0.060201748386025426,
+        "median": 0.037071675062179565,
+        "min": 0.022959547117352486,
+        "max": 0.8980081081390381,
+        "p10": 0.02770317532122135,
+        "p90": 0.07684605568647385
+      },
+      "actor/approx_kl": {
+        "mean": 0.004253470826661214,
+        "median": 0.003732663579285145,
+        "min": 0.0014291167026385665,
+        "max": 0.014639499597251415,
+        "p10": 0.002042145002633333,
+        "p90": 0.006853910628706217
+      },
+      "actor/grad_norm_before_clip": {
+        "mean": 5.199475696086884,
+        "median": 4.713679313659668,
+        "min": 3.6634645462036133,
+        "max": 16.17584228515625,
+        "p10": 3.881481409072876,
+        "p90": 6.523614883422852
+      },
+      "critic/grad_norm_before_clip": {
+        "mean": 0.8965634056925773,
+        "median": 0.8940014839172363,
+        "min": 0.3064567744731903,
+        "max": 2.4825668334960938,
+        "p10": 0.38971835374832153,
+        "p90": 1.3785932064056396
+      },
+      "actor/bad_grads_count": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      },
+      "critic/bad_grads_count": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      },
+      "actor/update_skipped": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      }
+    },
+    "mean_done_fraction": 0.028140869140625,
+    "mean_terminated_fraction": 0.024583740234375,
+    "max_end_rollout_abs_dof_vel": 47.43363571166992,
+    "rank_fit_end": [
+      {
+        "event": "fit_end",
+        "rank": 0,
+        "monotonic": 204692.659389768,
+        "epoch": 100,
+        "step_count": 819200,
+        "fit_seconds": 285.4977975960064
+      }
+    ],
+    "all_logged_loss_scalars_finite": true
+  },
+  "mjlab_astro512_dual256_budget4_20261029": {
+    "label": "mjlab_astro512_dual256_budget4_20261029",
+    "world_size": 2,
+    "envs_per_rank": 256,
+    "batch_size_per_rank": 1024,
+    "rollout_steps": 32,
+    "iterations": 100,
+    "warmup_excluded": 10,
+    "steady_iterations": 90,
+    "global_transitions": 1638400,
+    "returncode": 0,
+    "abort_reason": null,
+    "run_wall_seconds": 413.86802013599663,
+    "steady_compute_fps": 5194.012348143133,
+    "steady_wall_fps": 4996.738330326846,
+    "steady_rollout_fps": 5753.087686153956,
+    "compute_iteration_seconds": {
+      "mean": 3.1544014341547153,
+      "median": 3.1441014190058922,
+      "min": 3.1166409559955355,
+      "max": 3.4776175339939073,
+      "p10": 3.132272953982465,
+      "p90": 3.167522851988906
+    },
+    "rollout_seconds": {
+      "mean": 2.8478620340572283,
+      "median": 2.842082344504888,
+      "min": 2.8177167490066495,
+      "max": 3.175165772001492,
+      "p10": 2.8285785840125754,
+      "p90": 2.862983232975239
+    },
+    "update_seconds": {
+      "mean": 0.306641307632607,
+      "median": 0.3026225049979985,
+      "min": 0.29670480999629945,
+      "max": 0.6135396719910204,
+      "p10": 0.29894537501968443,
+      "p90": 0.30842936199042015
+    },
+    "torch_peak_allocated_GiB": 2.1216468811035156,
+    "torch_peak_reserved_GiB": 2.427734375,
+    "memory_by_physical_gpu": {
+      "2": {
+        "peak_total_used_MiB": 138580,
+        "baseline_used_MiB": 133811,
+        "peak_increment_MiB": 4769,
+        "growth_method": "reference corrected estimate",
+        "final_used_MiB": 133811,
+        "minimum_free_MiB": 4577
+      },
+      "3": {
+        "peak_total_used_MiB": 138053,
+        "baseline_used_MiB": 133811,
+        "peak_increment_MiB": 4242,
+        "growth_method": "reference corrected estimate",
+        "final_used_MiB": 133811,
+        "minimum_free_MiB": 5104
+      }
+    },
+    "loss_statistics": {
+      "losses/actor_loss": {
+        "mean": -0.05322394036222249,
+        "median": 0.004065806744620204,
+        "min": -3.2902672290802,
+        "max": 0.36571213603019714,
+        "p10": -0.16502203047275543,
+        "p90": 0.22182275354862213
+      },
+      "losses/critic_loss": {
+        "mean": 0.05818904923275113,
+        "median": 0.03784618154168129,
+        "min": 0.020213061943650246,
+        "max": 0.9104804992675781,
+        "p10": 0.025171790271997452,
+        "p90": 0.07828227430582047
+      },
+      "actor/approx_kl": {
+        "mean": 0.005317959398962557,
+        "median": 0.0041884377133101225,
+        "min": 0.0014335887972265482,
+        "max": 0.014056075364351273,
+        "p10": 0.002181073185056448,
+        "p90": 0.010381575673818588
+      },
+      "actor/grad_norm_before_clip": {
+        "mean": 3.9704874634742735,
+        "median": 3.5103964805603027,
+        "min": 2.632765054702759,
+        "max": 11.445610046386719,
+        "p10": 3.0009608268737793,
+        "p90": 4.915897369384766
+      },
+      "critic/grad_norm_before_clip": {
+        "mean": 0.9989778476953507,
+        "median": 0.7845327854156494,
+        "min": 0.2972809672355652,
+        "max": 3.73171067237854,
+        "p10": 0.4438644349575043,
+        "p90": 1.7275103330612183
+      },
+      "actor/bad_grads_count": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      },
+      "critic/bad_grads_count": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      },
+      "actor/update_skipped": {
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p10": 0.0,
+        "p90": 0.0
+      }
+    },
+    "mean_done_fraction": 0.0270953369140625,
+    "mean_terminated_fraction": 0.0234722900390625,
+    "max_end_rollout_abs_dof_vel": 43.13106918334961,
+    "rank_fit_end": [
+      {
+        "event": "fit_end",
+        "rank": 0,
+        "monotonic": 206596.151877606,
+        "epoch": 100,
+        "step_count": 1638400,
+        "fit_seconds": 330.8608735629823
+      },
+      {
+        "event": "fit_end",
+        "rank": 1,
+        "monotonic": 206596.148136136,
+        "epoch": 100,
+        "step_count": 1638400,
+        "fit_seconds": 330.85686950798845
+      }
+    ],
+    "all_logged_loss_scalars_finite": true
+  },
+  "comparison": {
+    "compute_speedup": 1.682783540600894,
+    "wall_speedup": 1.690261592501567
+  }
+}

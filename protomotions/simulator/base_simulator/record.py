@@ -310,7 +310,7 @@ class RecordingMixin:
                     )
                 else:
                     # Finalize recording and create video
-                    from moviepy import ImageSequenceClip
+                    import imageio.v2 as imageio
 
                     image_dir = self._curr_user_recording_name
                     images = sorted(
@@ -321,28 +321,16 @@ class RecordingMixin:
                         ]
                     )
 
-                    clip = ImageSequenceClip(images, fps=30)
-                    clip.write_videofile(
-                        f"{self._curr_user_recording_name}.mp4",
-                        codec="libx264",
-                        audio=False,
-                        threads=32,
-                        preset="veryfast",
-                        ffmpeg_params=[
-                            "-profile:v",
-                            "main",
-                            "-level",
-                            "4.0",
-                            "-pix_fmt",
-                            "yuv420p",
-                            "-movflags",
-                            "+faststart",
-                            "-crf",
-                            "23",
-                            "-x264-params",
-                            "keyint=60:min-keyint=30",
-                        ],
-                    )
+                    with imageio.get_writer(
+                        f"{self._curr_user_recording_name}.mp4", fps=30,
+                        codec="libx264", pixelformat="yuv420p", macro_block_size=1,
+                        ffmpeg_params=["-threads", "32", "-preset", "veryfast",
+                            "-profile:v", "main", "-level", "4.0",
+                            "-movflags", "+faststart", "-crf", "23",
+                            "-x264-params", "keyint=60:min-keyint=30"],
+                    ) as writer:
+                        for frame_path in images:
+                            writer.append_data(imageio.imread(frame_path))
                     self._delete_user_viewer_recordings = True
                     print(f"Video saved to {self._curr_user_recording_name}.mp4")
 

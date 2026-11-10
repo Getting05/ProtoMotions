@@ -40,7 +40,8 @@ dependencies = [
   "easydict>=1.10",
   "lightning>=2.3,<2.6",
   "matplotlib>=3.6",
-  "moviepy>=2,<3; python_version >= '3.9'",
+  "imageio>=2.31",
+  "imageio-ffmpeg>=0.4.9",
   "numpy>=1.21.1",
   "omegaconf==2.3.0",
   "PyYAML>=6",
@@ -57,6 +58,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mjlab = ["mjlab==1.6.0", "torch==2.11.0", "tensordict==0.9.0", "wandb==0.23.0"]
 # NOTE: these groups deliberately carry no `python_version` markers. A marker
 # that excludes the running interpreter makes the extra resolve to an EMPTY set,
 # so `pip install "protomotions[mujoco]"` on an unsupported Python reports

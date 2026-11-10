@@ -30,6 +30,7 @@ from protomotions.simulator.isaaclab.config import IsaacLabSimParams
 from protomotions.simulator.genesis.config import GenesisSimParams
 from protomotions.simulator.newton.config import NewtonSimParams
 from protomotions.simulator.mujoco.config import MujocoSimParams
+from protomotions.simulator.mjlab.config import MjLabSimParams
 
 from typing import List, Optional, Dict, Tuple, Union
 from enum import Enum
@@ -40,6 +41,7 @@ import torch
 
 @dataclass
 class SimulatorParams:
+    mjlab: MjLabSimParams = field(default_factory=MjLabSimParams)
     isaacgym: IsaacGymSimParams = field(default_factory=IsaacGymSimParams)
     isaaclab: IsaacLabSimParams = field(default_factory=IsaacLabSimParams)
     genesis: GenesisSimParams = field(default_factory=GenesisSimParams)
