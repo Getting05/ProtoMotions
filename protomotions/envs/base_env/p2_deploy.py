@@ -12,14 +12,22 @@ class P2DeployEnv(BaseEnv):
         self._deploy_bank = None
         self._deploy_resetting = False
         super().__init__(*args, **kwargs)
-        if not hasattr(self.simulator, '_scene'):
-            raise ValueError('P2 deployment sensor environment currently requires IsaacLab')
+        if not hasattr(self.simulator, 'register_post_physics_substep') and not hasattr(self.simulator, '_scene'):
+            raise ValueError('P2 deployment sensor environment requires IsaacLab or mjlab')
         physics_dt = 1. / self.simulator.config.sim.fps
         if abs(physics_dt - CONTRACT['physics_dt']) > 1e-9 or abs(self.dt - .02) > 1e-9:
             raise ValueError('P2 deployment contract requires 200 Hz physics / 50 Hz policy')
         self._install_deploy_sensor_hook()
 
     def _install_deploy_sensor_hook(self):
+        if hasattr(self.simulator, "register_post_physics_substep"):
+            def sample_after_substep():
+                if (not self._deploy_resetting and self._deploy_bank is not None
+                        and not getattr(self.simulator, "_flushing_contact_cache", False)):
+                    guard = getattr(self.simulator, "_physics_guard", None)
+                    self._sample_deploy_sensors(None if guard is None else guard.invalid)
+            self.simulator.register_post_physics_substep(sample_after_substep)
+            return
         # All IsaacLab step paths (normal, physics guard and trace) update this
         # same scene after each physical substep. The wrapper is instance-local.
         update_scene = self.simulator._scene.update
