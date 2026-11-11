@@ -34,3 +34,6 @@ NvStreamer*
 data/smpl/*
 data/pretrained_models/*
 *.log
+# External pretrained trackers and generated Stage2 weights
+checkpoints/
+runs/gpc-stage2-fsq93/
