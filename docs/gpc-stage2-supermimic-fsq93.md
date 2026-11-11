@@ -16,7 +16,7 @@ Only load a trusted checkpoint; the loader requires pickle metadata.
 
 On server118:
 ```bash
-source /root/code/activate-protomotions.sh
+source /root/code/activate-protomotions-gpc-fsq93.sh
 cd /root/code/ProtoMotions
 python scripts/verify_supermimic_fsq93.py --checkpoint checkpoints/ckpt_0014000.pt
 python scripts/train_gpc_stage2_supermimic_fsq93.py \
@@ -30,5 +30,5 @@ Each .npz shard must have `obs_hist` float32[N,930] and `goal` float32[N,730]
 from the same timestep. Keep feature order and history order identical to
 SuperMimic; do not substitute ProtoMotions observations.
 
-The offline Stage2 training loop is implemented, but collecting those physics
+A separate, 35 MiB `ckpt_0014000_tracker_only.pt` file contains only the\npolicy/config subset needed for Stage2; the original full checkpoint also\nremains available via the `ckpt_0014000.pt` path.\n\nThe offline Stage2 training loop is implemented, but collecting those physics
 rollouts and verifying online closed-loop execution are still separate tasks.
