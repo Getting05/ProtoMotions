@@ -16,8 +16,8 @@ simulation:
   nconmax: 128
   njmax: 768
 stage3:
-  envs_per_gpu: 2048
-  minibatch_size: 4096
+  envs_per_gpu: 3072
+  minibatch_size: 8192
   rollout_steps: 32
   ppo_epochs: 2
   iterations: 125
