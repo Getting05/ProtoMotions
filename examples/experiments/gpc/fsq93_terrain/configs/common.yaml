@@ -1,0 +1,31 @@
+seed: 20261124
+assets:
+  stage2: /root/code/ProtoMotions-GPC-FSQ93-stage2/output/stage2_fsq93_8gpu_20261111/stage2_last.pt
+  tracker: /root/code/ProtoMotions-GPC-FSQ93-stage2/checkpoints/ckpt_0014000.pt
+  reset_cases: /root/code/physics-drift-gpc-stage3-onestep-20261109/runs/head-ablation-20261114/cases.pt
+  robot_xml: /root/code/physics-drift-supermimic93/deployment-assets/astro_p2_deploy_reduced.xml
+simulation:
+  backend: mjlab
+  nconmax: 128
+  njmax: 768
+task:
+  position_scale: 0.42
+  success_radius: 0.30
+  map_samples: 33
+  map_spacing: 0.19
+stage3:
+  rank: 64
+  alpha: 128
+  prior_top_p: 0.9
+  temperature: 1.0
+  kl_coeff: 0.01
+  envs: 16
+  rollout_steps: 32
+  minibatch: 8
+  ppo_epochs: 2
+  episode_steps: 512
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip: 0.2
+  lr: 0.0001
+  grad_clip: 0.5

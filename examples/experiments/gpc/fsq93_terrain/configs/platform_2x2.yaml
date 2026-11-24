@@ -1,0 +1,8 @@
+layout: platform_2x2
+seed: 20261124
+rows: 2
+cols: 2
+size_m: [2.0, 2.0]
+gap_m: [0.55, 0.55]
+base_height_m: 0.82
+height_delta_m: 0.0

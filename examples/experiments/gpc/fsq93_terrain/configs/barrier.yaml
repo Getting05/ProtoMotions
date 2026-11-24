@@ -1,0 +1,10 @@
+layout: barrier
+seed: 20261124
+corridor_length_m: 13.0
+corridor_width_m: 2.20
+lane_width_m: 1.60
+barrier_x_m: [2.25, 4.30, 6.35, 8.40, 10.45]
+clearance_m: [0.62, 0.92]
+beam_depth_m: 0.30
+beam_thickness_m: 0.17
+target_mode: one_barrier

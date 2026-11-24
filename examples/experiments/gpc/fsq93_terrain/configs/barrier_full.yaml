@@ -1,0 +1,4 @@
+terrain_base: barrier.yaml
+target_mode: full_corridor
+stage3:
+  episode_steps: 1000

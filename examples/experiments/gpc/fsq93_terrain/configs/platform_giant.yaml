@@ -1,0 +1,8 @@
+layout: platform_giant
+seed: 20261124
+rows: 5
+cols: 6
+size_m: [1.55, 2.45]
+gap_m: [0.7, 1.7]
+base_height_m: 0.82
+height_delta_m: 0.30
